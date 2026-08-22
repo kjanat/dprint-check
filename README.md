@@ -1,53 +1,66 @@
 # dprint check action
 
-This action runs `dprint check` on your source code and fails the build if something is not properly formatted.
+This action installs dprint, caches the binary and compiled WASM plugins, then runs `dprint check`.
 
 ## Usage
 
 1. Checkout your repo.
-2. Run `dprint/check` action.
+2. Run the `dprint/check` action.
 
 ```yml
 jobs:
   style:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: dprint/check@v2.3
+      - uses: dprint/check@v3
 ```
 
-If you are using a matrix, most likely you will only want to run it only on Linux. For example:
+The cache is enabled by default. Its key includes the dprint version, runner OS and architecture, and the contents of
+every discovered dprint config. The action warms the plugins after a cache miss so the following dprint invocation does
+not compile them.
+
+To disable caching:
 
 ```yml
-- uses: dprint/check@v2.3
-  if: runner.os == 'Linux'
+- uses: dprint/check@v3
+  with:
+    cache: false
 ```
 
-### Latest Version
+### Install only
 
-By default, `dprint/check` uses the latest version of dprint.
-
-### Specific Version
-
-To use a specific version, specify that with the `dprint-version` input:
+Set `run-check` to `false` to install dprint and populate its caches without checking formatting. The installed binary is
+added to `PATH` for later steps.
 
 ```yml
-- uses: dprint/check@v2.3
+- uses: dprint/check@v3
+  with:
+    run-check: false
+- run: dprint fmt
+```
+
+### Version
+
+By default, the action discovers the latest dprint release and selects the published ZIP matching the runner. To use a
+specific release:
+
+```yml
+- uses: dprint/check@v3
   with:
     dprint-version: 0.30.3
 ```
 
-### Config Path
+Downloads are verified with the asset's SHA-256 digest. For older releases without asset digests, the action discovers
+and uses the release's `SHASUMS256.txt` asset.
 
-By default, `dprint/check` uses the auto-discovered configuration file.
+### Config path
 
-### Specific Config
-
-To use a specific config, specify that with the `config-path` input:
+By default, dprint auto-discovers its configuration. To use a specific config:
 
 ```yml
-- uses: dprint/check@v2.3
+- uses: dprint/check@v3
   with:
     config-path: dprint-ci.json
 ```
@@ -60,12 +73,32 @@ To pass additional arguments to `dprint check`, pass them to the `args` input. E
 - name: Get changed files
   id: changed-files
   uses: tj-actions/changed-files@v45
-- uses: dprint/check@v2.3
+- uses: dprint/check@v3
   with:
     args: >-
       --allow-no-files
       ${{ steps.changed-files.outputs.all_changed_files }}
 ```
+
+## Inputs
+
+| Input            | Default         | Description                                   |
+| ---------------- | --------------- | --------------------------------------------- |
+| `dprint-version` | latest          | dprint release to install                     |
+| `cache`          | `true`          | Cache the binary and compiled WASM plugins    |
+| `run-check`      | `true`          | Run `dprint check` after installation         |
+| `config-path`    | auto-discovered | Configuration passed to dprint                |
+| `args`           |                 | Additional arguments passed to `dprint check` |
+
+## Outputs
+
+| Output             | Description                                          |
+| ------------------ | ---------------------------------------------------- |
+| `version`          | Installed dprint version                             |
+| `location`         | Absolute path to the installed binary                |
+| `cache-hit`        | Whether the binary was restored from cache           |
+| `plugin-cache-hit` | Whether the exact compiled-plugin cache was restored |
+| `plugin-cache-key` | Cache key for the compiled plugins                   |
 
 ## Troubleshooting
 
@@ -89,5 +122,5 @@ You can fix this by only running the action on Linux as shown above (recommended
     git config --global core.autocrlf false
     git config --global core.eol lf
 
-- uses: actions/checkout@v4
+- uses: actions/checkout@v7
 ```

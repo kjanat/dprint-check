@@ -1,0 +1,4 @@
+node_modules/
+/dist/*
+!/dist/main.mjs
+!/dist/post.mjs

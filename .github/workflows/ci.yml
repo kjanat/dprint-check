@@ -2,43 +2,132 @@ name: CI
 
 on: [push, pull_request]
 
+permissions:
+  contents: read
+
+env:
+  DPRINT_VERSION: 0.56.1
+
+defaults:
+  run:
+    shell: pwsh
+
 jobs:
-  style:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version-file: package.json
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+      - run: bun test
+      - run: bun run build
+      - run: dprint check
+      - run: git diff --exit-code -- dist
+
+  behavior:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-latest, macOS-latest, windows-latest]
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
       - name: Use LF line endings
         run: |
           git config --global core.autocrlf false
           git config --global core.eol lf
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - name: Check formatting latest
-        uses: ./
-
-      - name: Check formatting specific version
+      - name: Check formatting
+        id: dprint
         uses: ./
         with:
-          dprint-version: 0.49.1
+          dprint-version: ${{ env.DPRINT_VERSION }}
 
-      - name: Check formatting specific config
-        uses: ./
-        with:
-          config-path: "dprint.json"
-
-      - name: Check formatting specific version and config
-        uses: ./
-        with:
-          dprint-version: 0.49.1
-          config-path: "dprint.json"
-
-      - name: make poorly-formatted json file
+      - name: Verify installation outputs
         run: |
-          echo '{"a": 1, "b": 2}' > poorly-formatted.json
+          if ("${{ steps.dprint.outputs.version }}" -ne "$env:DPRINT_VERSION") { throw "Wrong dprint version" }
+          if (-not (Test-Path -LiteralPath "${{ steps.dprint.outputs.location }}")) { throw "Missing dprint binary" }
+          dprint --version
+
+      - name: Make poorly formatted JSON file
+        run: |
+          Set-Content -NoNewline poorly-formatted.json '{"a": 1, "b": 2}'
       - name: Check formatting with excludes
         uses: ./
         with:
+          dprint-version: ${{ env.DPRINT_VERSION }}
+          config-path: dprint.json
           args: --excludes poorly-formatted.json
+
+  install-only:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: |
+          Set-Content -NoNewline poorly-formatted.json '{"a": 1, "b": 2}'
+      - id: dprint
+        uses: ./
+        with:
+          dprint-version: ${{ env.DPRINT_VERSION }}
+          run-check: false
+      - name: Use installed dprint
+        run: |
+          dprint fmt poorly-formatted.json
+          dprint check poorly-formatted.json
+          if (-not (Test-Path -LiteralPath "${{ steps.dprint.outputs.location }}")) { throw "Missing dprint binary" }
+
+  no-cache:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - id: dprint
+        uses: ./
+        with:
+          dprint-version: ${{ env.DPRINT_VERSION }}
+          cache: false
+      - name: Verify cache outputs
+        run: |
+          if ("${{ steps.dprint.outputs.cache-hit }}" -ne "false") { throw "Unexpected binary cache hit" }
+          if ("${{ steps.dprint.outputs.plugin-cache-hit }}" -ne "false") { throw "Unexpected plugin cache hit" }
+          if ("${{ steps.dprint.outputs.plugin-cache-key }}" -ne "") { throw "Unexpected plugin cache key" }
+
+  cache-prime:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - name: Use LF line endings
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+      - uses: actions/checkout@v7
+      - uses: ./
+        with:
+          dprint-version: ${{ env.DPRINT_VERSION }}
+          run-check: false
+
+  cache-hit:
+    needs: cache-prime
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - name: Use LF line endings
+        run: |
+          git config --global core.autocrlf false
+          git config --global core.eol lf
+      - uses: actions/checkout@v7
+      - id: dprint
+        uses: ./
+        with:
+          dprint-version: ${{ env.DPRINT_VERSION }}
+          run-check: false
+      - name: Verify exact cache hits
+        run: |
+          if ("${{ steps.dprint.outputs.cache-hit }}" -ne "true") { throw "Expected binary cache hit" }
+          if ("${{ steps.dprint.outputs.plugin-cache-hit }}" -ne "true") { throw "Expected plugin cache hit" }

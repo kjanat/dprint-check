@@ -1,0 +1,32 @@
+{
+	"name": "dprint-check-action",
+	"version": "3.0.0",
+	"private": true,
+	"description": "GitHub Action to install dprint with caching and check formatting",
+	"license": "MIT",
+	"type": "module",
+	"scripts": {
+		"build": "tsdown",
+		"check": "dprint check && tsc --noEmit && bun test",
+		"fmt": "dprint fmt",
+		"test": "bun test",
+		"typecheck": "tsc --noEmit"
+	},
+	"devDependencies": {
+		"@actions/cache": "^6",
+		"@actions/core": "^3",
+		"@actions/exec": "^3",
+		"@actions/glob": "^0.7",
+		"@actions/http-client": "^4",
+		"@actions/io": "^3",
+		"@actions/tool-cache": "^4",
+		"@types/bun": "^1.3",
+		"@types/node": "^24",
+		"tsdown": "^0.22.12",
+		"typescript": "^7"
+	},
+	"packageManager": "bun@1.4.0",
+	"engines": {
+		"node": "24"
+	}
+}
