@@ -1,2 +1,2 @@
-bun.lock linguist-generated -diff
-dist/** linguist-generated -diff
+bun.lock linguist-generated
+dist/**  linguist-generated -diff

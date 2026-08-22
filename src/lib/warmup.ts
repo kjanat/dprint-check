@@ -1,6 +1,7 @@
 import { info, warning } from "@actions/core";
 import { dirname } from "node:path";
-import { execFileAsync } from "./exec.ts";
+
+import { execFileAsync } from "#lib/exec";
 
 const ATTEMPTS = 3;
 const TIMEOUT_MS = 60_000;

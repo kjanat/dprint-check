@@ -1,6 +1,7 @@
 import { arch, endianness, platform } from "node:os";
-import { execFileAsync } from "./exec.ts";
-import type { ReleaseAsset } from "./version.ts";
+
+import { execFileAsync } from "#lib/exec";
+import type { ReleaseAsset } from "#lib/version";
 
 async function detectLibc(): Promise<"gnu" | "musl"> {
 	try {

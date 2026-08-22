@@ -3,8 +3,9 @@ import { createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { checksumFromManifest, verifyReleaseAsset } from "../src/checksum.ts";
-import type { ReleaseAsset } from "../src/version.ts";
+
+import { checksumFromManifest, resolveReleaseAssetChecksum, verifyReleaseAsset } from "#lib/checksum";
+import type { ReleaseAsset } from "#lib/version";
 
 const temporaryDirectories: string[] = [];
 
@@ -17,11 +18,18 @@ function asset(name: string, digest: string | null): ReleaseAsset {
 }
 
 describe("checksumFromManifest", () => {
-	test("finds GNU and binary-mode checksum entries by exact asset name", () => {
-		const hash = "a".repeat(64);
-		expect(checksumFromManifest(`${hash}  dprint-x86_64.zip\n`, "dprint-x86_64.zip")).toBe(hash);
-		expect(checksumFromManifest(`${hash} *dprint-aarch64.zip\n`, "dprint-aarch64.zip")).toBe(hash);
-		expect(checksumFromManifest(`${hash}  dprint-x86_64.zip\n`, "dprint.zip")).toBeUndefined();
+	const hash = "a".repeat(64);
+	test.each([
+		{ name: "GNU entry", manifest: `${hash}  dprint-x86_64.zip\n`, assetName: "dprint-x86_64.zip", expected: hash },
+		{
+			name: "binary-mode entry",
+			manifest: `${hash} *dprint-aarch64.zip\n`,
+			assetName: "dprint-aarch64.zip",
+			expected: hash,
+		},
+		{ name: "different asset", manifest: `${hash}  dprint-x86_64.zip\n`, assetName: "dprint.zip", expected: undefined },
+	])("parses $name", ({ manifest, assetName, expected }) => {
+		expect(checksumFromManifest(manifest, assetName)).toBe(expected);
 	});
 });
 
@@ -34,7 +42,8 @@ describe("verifyReleaseAsset", () => {
 		const digest = createHash("sha256").update("verified archive").digest("hex");
 		const releaseAsset = asset("dprint.zip", `sha256:${digest}`);
 
-		await expect(verifyReleaseAsset(archive, releaseAsset, [releaseAsset])).resolves.toBeUndefined();
+		const expected = await resolveReleaseAssetChecksum("0.56.1", releaseAsset, [releaseAsset]);
+		expect(verifyReleaseAsset(archive, releaseAsset, expected)).resolves.toBeUndefined();
 	});
 
 	test("rejects a mismatched GitHub digest", async () => {
@@ -44,10 +53,12 @@ describe("verifyReleaseAsset", () => {
 		await writeFile(archive, "unverified archive");
 		const releaseAsset = asset("dprint.zip", `sha256:${"0".repeat(64)}`);
 
-		await expect(verifyReleaseAsset(archive, releaseAsset, [releaseAsset])).rejects.toThrow("SHA-256 mismatch");
+		const expected = await resolveReleaseAssetChecksum("0.56.1", releaseAsset, [releaseAsset]);
+		expect(verifyReleaseAsset(archive, releaseAsset, expected)).rejects.toThrow("SHA-256 mismatch");
 	});
 
 	test("downloads the checksum manifest for older release assets", async () => {
+		expect.assertions(2);
 		const directory = await mkdtemp(join(tmpdir(), "dprint-checksum-"));
 		temporaryDirectories.push(directory);
 		const archive = join(directory, "dprint.zip");
@@ -58,9 +69,27 @@ describe("verifyReleaseAsset", () => {
 		const releaseAsset = asset("dprint.zip", null);
 		const checksumAsset = asset("SHASUMS256.txt", null);
 
-		await expect(verifyReleaseAsset(archive, releaseAsset, [releaseAsset, checksumAsset], async url => {
-			expect(url).toBe(checksumAsset.browser_download_url);
-			return manifest;
-		})).resolves.toBeUndefined();
+		const expected = await resolveReleaseAssetChecksum(
+			"0.49.1",
+			releaseAsset,
+			[releaseAsset, checksumAsset],
+			async url => {
+				expect(url).toBe(checksumAsset.browser_download_url);
+				return manifest;
+			},
+		);
+		expect(verifyReleaseAsset(archive, releaseAsset, expected)).resolves.toBeUndefined();
+	});
+
+	test("rejects unverifiable historical releases before downloading anything", async () => {
+		expect.assertions(2);
+		const releaseAsset = asset("dprint.zip", null);
+		let downloadCalled = false;
+
+		expect(resolveReleaseAssetChecksum("0.13.1", releaseAsset, [releaseAsset], async () => {
+			downloadCalled = true;
+			throw new Error("download should not run");
+		})).rejects.toThrow("dprint 0.13.1 cannot be securely installed");
+		expect(downloadCalled).toBeFalse();
 	});
 });

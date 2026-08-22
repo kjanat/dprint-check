@@ -1,25 +1,29 @@
 import { describe, expect, test } from "bun:test";
-import { buildCheckArgs, parseArgs } from "../src/check.ts";
+
+import { buildCheckArgs, parseArgs } from "#lib/check";
 
 describe("buildCheckArgs", () => {
-	test("uses auto-discovered config by default", () => {
-		expect(buildCheckArgs("", "")).toEqual(["check"]);
-	});
-
-	test("passes a config path as one argument", () => {
-		expect(buildCheckArgs("config files/dprint.json", "")).toEqual([
-			"check",
-			"--config",
-			"config files/dprint.json",
-		]);
-	});
-
-	test("parses quoted additional arguments without invoking a shell", () => {
-		expect(buildCheckArgs("", "--allow-no-files 'source files/**/*.ts'")).toEqual([
-			"check",
-			"--allow-no-files",
-			"source files/**/*.ts",
-		]);
+	test.each([
+		{
+			name: "uses auto-discovered config by default",
+			configPath: "",
+			additionalArgs: "",
+			expected: ["check"],
+		},
+		{
+			name: "passes a config path as one argument",
+			configPath: "config files/dprint.json",
+			additionalArgs: "",
+			expected: ["check", "--config", "config files/dprint.json"],
+		},
+		{
+			name: "parses quoted arguments without invoking a shell",
+			configPath: "",
+			additionalArgs: "--allow-no-files 'source files/**/*.ts'",
+			expected: ["check", "--allow-no-files", "source files/**/*.ts"],
+		},
+	])("$name", ({ configPath, additionalArgs, expected }) => {
+		expect(buildCheckArgs(configPath, additionalArgs)).toEqual([...expected]);
 	});
 
 	test("rejects an unterminated quote", () => {

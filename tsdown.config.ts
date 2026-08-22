@@ -1,7 +1,8 @@
-import { defineConfig, type UserConfig } from "tsdown";
+import { defineConfig } from "tsdown";
 
 const shared = {
-	minify: true,
+	minify: "dce-only",
+	clean: true,
 	target: "node24",
 	deps: {
 		alwaysBundle: [/.*/],
@@ -9,7 +10,7 @@ const shared = {
 		onlyImport: [],
 	},
 	outputOptions: { codeSplitting: false },
-} satisfies UserConfig;
+} satisfies import("tsdown").UserConfig;
 
 export default defineConfig([{
 	...shared,

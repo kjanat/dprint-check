@@ -1,9 +1,14 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, expectTypeOf, test } from "bun:test";
 import { readdir } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
-import action from "../action.yml" with { type: "yaml" };
+
+import action from "#action.yml" with { type: "yaml" };
 
 const root = dirname(import.meta.dir);
+
+expectTypeOf(action).not.toBeAny();
+expectTypeOf(action.runs.using).toEqualTypeOf<"node24">();
+expectTypeOf(action.inputs.token.default).toEqualTypeOf<"${{ github.token }}">();
 
 describe("action metadata", () => {
 	test("uses Node.js 24 with an always-running post step", () => {
@@ -15,10 +20,26 @@ describe("action metadata", () => {
 		});
 	});
 
-	test("keeps existing inputs and enables caching by default", () => {
-		expect(Object.keys(action.inputs)).toEqual(["dprint-version", "cache", "run-check", "config-path", "args"]);
-		expect(action.inputs.cache.default).toBe("true");
-		expect(action.inputs["run-check"].default).toBe("true");
+	test("keeps existing inputs", () => {
+		expect(Object.keys(action.inputs)).toEqual([
+			"dprint-version",
+			"token",
+			"cache",
+			"run-check",
+			"config-path",
+			"args",
+		]);
+	});
+
+	test.each(
+		[
+			["dprint-version", "latest"],
+			["token", "${{ github.token }}"],
+			["cache", "true"],
+			["run-check", "true"],
+		] as const,
+	)("defaults %s to %s", (input, expected) => {
+		expect(action.inputs[input].default).toBe(expected);
 	});
 
 	test("declares cache and installation outputs", () => {

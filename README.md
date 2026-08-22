@@ -13,7 +13,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-
       - uses: dprint/check@v3
 ```
 
@@ -36,8 +35,7 @@ added to `PATH` for later steps.
 
 ```yml
 - uses: dprint/check@v3
-  with:
-    run-check: false
+  with: { run-check: false }
 - run: dprint fmt
 ```
 
@@ -48,12 +46,12 @@ specific release:
 
 ```yml
 - uses: dprint/check@v3
-  with:
-    dprint-version: 0.30.3
+  with: { dprint-version: 0.30.3 }
 ```
 
 Downloads are verified with the asset's SHA-256 digest. For older releases without asset digests, the action discovers
-and uses the release's `SHASUMS256.txt` asset.
+and uses the release's `SHASUMS256.txt` asset. Releases without either are rejected before downloading the binary; in
+dprint's published release history, this means versions before `0.14.0` cannot be installed by this action.
 
 ### Config path
 
@@ -61,13 +59,13 @@ By default, dprint auto-discovers its configuration. To use a specific config:
 
 ```yml
 - uses: dprint/check@v3
-  with:
-    config-path: dprint-ci.json
+  with: { config-path: dprint-ci.json }
 ```
 
 ### Args
 
-To pass additional arguments to `dprint check`, pass them to the `args` input. E.g. to only check changed files:
+To pass additional arguments to `dprint check`, pass them to the `args` input.
+E.g. to only check changed files:
 
 ```yml
 - name: Get changed files
@@ -85,6 +83,7 @@ To pass additional arguments to `dprint check`, pass them to the `args` input. E
 | Input            | Default         | Description                                   |
 | ---------------- | --------------- | --------------------------------------------- |
 | `dprint-version` | latest          | dprint release to install                     |
+| `token`          | `github.token`  | Token used to query GitHub release metadata   |
 | `cache`          | `true`          | Cache the binary and compiled WASM plugins    |
 | `run-check`      | `true`          | Run `dprint check` after installation         |
 | `config-path`    | auto-discovered | Configuration passed to dprint                |
@@ -106,21 +105,26 @@ To pass additional arguments to `dprint check`, pass them to the `args` input. E
 
 When running on Windows, you may get a lot of messages like:
 
-```
+```plaintext
 from D:\a\check\check\README.md:
  | Text differed by line endings.
 --
 ```
 
-This is because unfortunately git is configured in GH actions to check out line endings as CRLF (`\r\n`).
+This is because unfortunately git is configured in GH actions to check out line
+endings as CRLF (`\r\n`).
 
-You can fix this by only running the action on Linux as shown above (recommended), or to do the following before checking out the repo:
+You can fix this by only running the action on Linux as shown above (recommended),
+or to do the following before checking out the repo:
 
 ```yml
 - name: Ensure LF line endings for Windows
   run: |
     git config --global core.autocrlf false
     git config --global core.eol lf
+
+# or use our re-useable action to do this for you:
+- uses: dprint/check/actions/git-lf@v3
 
 - uses: actions/checkout@v7
 ```

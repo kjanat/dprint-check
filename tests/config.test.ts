@@ -1,22 +1,22 @@
+import { env } from "bun";
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { computeCacheKey, findConfigFiles } from "../src/config.ts";
 
-const originalWorkspace = process.env["GITHUB_WORKSPACE"];
+import { computeCacheKey, findConfigFiles } from "#lib/config";
+
+env["GITHUB_WORKSPACE"] = undefined;
 const temporaryDirectories: string[] = [];
 
 afterEach(async () => {
-	if (originalWorkspace === undefined) delete process.env["GITHUB_WORKSPACE"];
-	else process.env["GITHUB_WORKSPACE"] = originalWorkspace;
 	await Promise.all(temporaryDirectories.splice(0).map(path => rm(path, { recursive: true, force: true })));
 });
 
 async function workspace(): Promise<string> {
 	const path = await mkdtemp(join(tmpdir(), "dprint-check-"));
 	temporaryDirectories.push(path);
-	process.env["GITHUB_WORKSPACE"] = path;
+	env["GITHUB_WORKSPACE"] = path;
 	return path;
 }
 

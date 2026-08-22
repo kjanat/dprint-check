@@ -16,5 +16,5 @@
 		"types": ["bun", "node"]
 	},
 	"include": ["tsdown.config.ts", "src/**/*.ts", "tests/**/*.ts"],
-	"exclude": ["dist"]
+	"exclude": ["dist", "node_modules"]
 }

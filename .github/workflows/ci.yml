@@ -1,62 +1,50 @@
+# yaml-language-server: $schema=https://www.schemastore.org/github-workflow.json
+---
 name: CI
-
 on: [push, pull_request]
-
-permissions:
-  contents: read
-
-env:
-  DPRINT_VERSION: 0.56.1
-
-defaults:
-  run:
-    shell: pwsh
-
+concurrency: { group: "${{ github.head_ref || github.run_id }}", queue: single, cancel-in-progress: true }
+permissions: { contents: read }
+env: { DPRINT_VERSION: "0.56.1", NODE_VERSION: "24" }
+defaults: { run: { shell: pwsh } }
 jobs:
   quality:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - { uses: actions/setup-node@v7, with: { node-version: 24 } }
       - uses: oven-sh/setup-bun@v2
-        with:
-          bun-version-file: package.json
       - run: bun install --frozen-lockfile
-      - run: bun run typecheck
-      - run: bun test
-      - run: bun run build
+      - run: bun run --sequential typecheck test build
       - run: dprint check
       - run: git diff --exit-code -- dist
 
   behavior:
     runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+    strategy: { matrix: { os: [ubuntu-latest, macos-latest, windows-latest] } }
     steps:
       - name: Use LF line endings
-        run: |
-          git config --global core.autocrlf false
-          git config --global core.eol lf
+        uses: $/actions/git-lf
 
       - uses: actions/checkout@v7
 
       - name: Check formatting
         id: dprint
-        uses: ./
-        with:
-          dprint-version: ${{ env.DPRINT_VERSION }}
+        uses: $/action.yml
+        with: { dprint-version: "${{ env.DPRINT_VERSION }}" }
 
       - name: Verify installation outputs
+        env: { OUTPUTS: "${{ toJSON(steps.dprint.outputs) }}" }
         run: |
-          if ("${{ steps.dprint.outputs.version }}" -ne "$env:DPRINT_VERSION") { throw "Wrong dprint version" }
-          if (-not (Test-Path -LiteralPath "${{ steps.dprint.outputs.location }}")) { throw "Missing dprint binary" }
+          $outputs = $env:OUTPUTS | ConvertFrom-Json
+          if ($outputs.version -ne $env:DPRINT_VERSION)        { throw "Wrong dprint version"  }
+          if (-not (Test-Path -LiteralPath $outputs.location)) { throw "Missing dprint binary" }
           dprint --version
 
       - name: Make poorly formatted JSON file
-        run: |
-          Set-Content -NoNewline poorly-formatted.json '{"a": 1, "b": 2}'
+        env: { BAD_JSON: '{"a": 1, "b": 2}' }
+        run: Set-Content -NoNewline poorly-formatted.json $env:BAD_JSON
       - name: Check formatting with excludes
-        uses: ./
+        uses: $/action.yml
         with:
           dprint-version: ${{ env.DPRINT_VERSION }}
           config-path: dprint.json
@@ -66,68 +54,57 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - run: |
-          Set-Content -NoNewline poorly-formatted.json '{"a": 1, "b": 2}'
+      - env: { BAD_JSON: '{"a": 1, "b": 2}' }
+        run: Set-Content -NoNewline poorly-formatted.json $env:BAD_JSON
       - id: dprint
-        uses: ./
-        with:
-          dprint-version: ${{ env.DPRINT_VERSION }}
-          run-check: false
+        uses: $/action.yml
+        with: { run-check: false, dprint-version: "${{ env.DPRINT_VERSION }}" }
       - name: Use installed dprint
+        env: { OUTPUTS: "${{ toJSON(steps.dprint.outputs) }}" }
         run: |
+          $outputs = $env:OUTPUTS | ConvertFrom-Json
           dprint fmt poorly-formatted.json
           dprint check poorly-formatted.json
-          if (-not (Test-Path -LiteralPath "${{ steps.dprint.outputs.location }}")) { throw "Missing dprint binary" }
+          if (-not (Test-Path -LiteralPath $outputs.location)) { throw "Missing dprint binary" }
 
   no-cache:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
       - id: dprint
-        uses: ./
-        with:
-          dprint-version: ${{ env.DPRINT_VERSION }}
-          cache: false
+        uses: $/action.yml
+        with: { cache: false, dprint-version: "${{ env.DPRINT_VERSION }}" }
       - name: Verify cache outputs
+        env: { OUTPUTS: "${{ toJSON(steps.dprint.outputs) }}" }
         run: |
-          if ("${{ steps.dprint.outputs.cache-hit }}" -ne "false") { throw "Unexpected binary cache hit" }
-          if ("${{ steps.dprint.outputs.plugin-cache-hit }}" -ne "false") { throw "Unexpected plugin cache hit" }
-          if ("${{ steps.dprint.outputs.plugin-cache-key }}" -ne "") { throw "Unexpected plugin cache key" }
+          $outputs = $env:OUTPUTS | ConvertFrom-Json
+          if ($outputs.cache-hit         -ne "false") { throw "Unexpected binary cache hit" }
+          if ($outputs.plugin-cache-hit  -ne "false") { throw "Unexpected plugin cache hit" }
+          if ($outputs.plugin-cache-key  -ne "false") { throw "Unexpected plugin cache key" }
 
   cache-prime:
     runs-on: ${{ matrix.os }}
     strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+      matrix: { os: [ubuntu-latest, macos-latest, windows-latest] }
     steps:
       - name: Use LF line endings
-        run: |
-          git config --global core.autocrlf false
-          git config --global core.eol lf
+        uses: $/actions/git-lf
       - uses: actions/checkout@v7
-      - uses: ./
-        with:
-          dprint-version: ${{ env.DPRINT_VERSION }}
-          run-check: false
+      - uses: $/action.yml
+        with: { run-check: false, dprint-version: "${{ env.DPRINT_VERSION }}" }
 
   cache-hit:
     needs: cache-prime
     runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+    strategy: { matrix: { os: [ubuntu-latest, macos-latest, windows-latest] } }
     steps:
       - name: Use LF line endings
-        run: |
-          git config --global core.autocrlf false
-          git config --global core.eol lf
+        uses: $/actions/git-lf
       - uses: actions/checkout@v7
       - id: dprint
-        uses: ./
-        with:
-          dprint-version: ${{ env.DPRINT_VERSION }}
-          run-check: false
+        uses: $/action.yml
+        with: { run-check: false, dprint-version: "${{ env.DPRINT_VERSION }}" }
       - name: Verify exact cache hits
         run: |
-          if ("${{ steps.dprint.outputs.cache-hit }}" -ne "true") { throw "Expected binary cache hit" }
+          if ("${{ steps.dprint.outputs.cache-hit }}"        -ne "true") { throw "Expected binary cache hit" }
           if ("${{ steps.dprint.outputs.plugin-cache-hit }}" -ne "true") { throw "Expected plugin cache hit" }

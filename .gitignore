@@ -1,4 +1,5 @@
 node_modules/
+/dprint-release-assets.json
 /dist/*
 !/dist/main.mjs
 !/dist/post.mjs

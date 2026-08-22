@@ -7,15 +7,17 @@ import { existsSync } from "node:fs";
 import { arch, homedir, platform } from "node:os";
 import { dirname, join } from "node:path";
 import { env } from "node:process";
-import { verifyReleaseAsset } from "./checksum.ts";
-import { selectReleaseAsset } from "./platform.ts";
-import { type Release, resolveRelease, specifiedVersion } from "./version.ts";
+
+import { resolveReleaseAssetChecksum, verifyReleaseAsset } from "#lib/checksum";
+import { selectReleaseAsset } from "#lib/platform";
+import type { Release, ReleaseAsset } from "#lib/version";
+import { resolveRelease, specifiedVersion } from "#lib/version";
 
 function installDir(): string {
 	return env["DPRINT_INSTALL"] ?? join(homedir(), ".dprint");
 }
 
-export async function installDprint(versionInput: string, cacheEnabled: boolean): Promise<{
+export async function installDprint(versionInput: string, cacheEnabled: boolean, token: string): Promise<{
 	version: string;
 	location: string;
 	cacheHit: boolean;
@@ -23,7 +25,7 @@ export async function installDprint(versionInput: string, cacheEnabled: boolean)
 	let release: Release | undefined;
 	let version = specifiedVersion(versionInput);
 	if (version === undefined) {
-		release = await resolveRelease("latest");
+		release = await resolveRelease("latest", token);
 		version = release.tag_name;
 	}
 	info(`Resolved dprint version: ${version}`);
@@ -56,12 +58,18 @@ export async function installDprint(versionInput: string, cacheEnabled: boolean)
 		}
 	}
 
-	release ??= await resolveRelease(version);
-	const asset = await selectReleaseAsset(release.assets);
+	release ??= await resolveRelease(version, token);
+	let asset: ReleaseAsset;
+	try {
+		asset = await selectReleaseAsset(release.assets);
+	} catch (error) {
+		throw new Error(`dprint ${version} cannot be installed on ${platform()}-${arch()}: ${describe(error)}`);
+	}
 	info(`Selected release asset: ${asset.name}`);
+	const expectedChecksum = await resolveReleaseAssetChecksum(version, asset, release.assets);
 	info(`Downloading dprint ${version}`);
 	const zipPath = await downloadTool(asset.browser_download_url);
-	await verifyReleaseAsset(zipPath, asset, release.assets);
+	await verifyReleaseAsset(zipPath, asset, expectedChecksum);
 	info(`Verified SHA-256 checksum for ${asset.name}`);
 	const extractedDir = await extractZip(zipPath);
 	const extractedBinary = join(extractedDir, `dprint${extension}`);

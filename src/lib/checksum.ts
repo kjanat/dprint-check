@@ -2,7 +2,8 @@ import { downloadTool } from "@actions/tool-cache";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { readFile } from "node:fs/promises";
-import type { ReleaseAsset } from "./version.ts";
+
+import type { ReleaseAsset } from "#lib/version";
 
 function digestFromAsset(asset: ReleaseAsset): string | undefined {
 	const match = asset.digest?.match(/^sha256:([0-9a-f]{64})$/iu);
@@ -19,21 +20,28 @@ export function checksumFromManifest(manifest: string, assetName: string): strin
 
 type Download = (url: string) => Promise<string>;
 
-async function expectedChecksum(
+export async function resolveReleaseAssetChecksum(
+	releaseTag: string,
 	asset: ReleaseAsset,
 	assets: readonly ReleaseAsset[],
-	download: Download,
+	download: Download = downloadTool,
 ): Promise<string> {
 	const digest = digestFromAsset(asset);
 	if (digest !== undefined) return digest;
 
 	const manifestAsset = assets.find(candidate => candidate.name === "SHASUMS256.txt");
 	if (manifestAsset === undefined) {
-		throw new Error(`Release provides neither a SHA-256 digest for ${asset.name} nor SHASUMS256.txt`);
+		throw new Error(
+			`dprint ${releaseTag} cannot be securely installed: the release provides neither a SHA-256 digest for ${asset.name} nor SHASUMS256.txt`,
+		);
 	}
 	const manifestPath = await download(manifestAsset.browser_download_url);
 	const checksum = checksumFromManifest(await readFile(manifestPath, "utf8"), asset.name);
-	if (checksum === undefined) throw new Error(`SHASUMS256.txt has no checksum for ${asset.name}`);
+	if (checksum === undefined) {
+		throw new Error(
+			`dprint ${releaseTag} cannot be securely installed: SHASUMS256.txt has no checksum for ${asset.name}`,
+		);
+	}
 	return checksum;
 }
 
@@ -46,12 +54,10 @@ async function sha256(path: string): Promise<string> {
 export async function verifyReleaseAsset(
 	archivePath: string,
 	asset: ReleaseAsset,
-	assets: readonly ReleaseAsset[],
-	download: Download = downloadTool,
+	expectedChecksum: string,
 ): Promise<void> {
-	const expected = await expectedChecksum(asset, assets, download);
 	const actual = await sha256(archivePath);
-	if (actual !== expected) {
-		throw new Error(`SHA-256 mismatch for ${asset.name}: expected ${expected}, got ${actual}`);
+	if (actual !== expectedChecksum) {
+		throw new Error(`SHA-256 mismatch for ${asset.name}: expected ${expectedChecksum}, got ${actual}`);
 	}
 }

@@ -5,14 +5,15 @@ import { arch } from "node:os";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { cwd, env, platform } from "node:process";
 
-const CONFIG_NAMES = [".dprint.jsonc", ".dprint.json", "dprint.jsonc", "dprint.json"] as const;
-
-function workspacePath(): string {
-	return env["GITHUB_WORKSPACE"] ?? cwd();
-}
+const CONFIG_NAMES = ["dprint.json", "dprint.jsonc", ".dprint.json", ".dprint.jsonc"] as const;
+const sys = {
+	arch: arch(),
+	platform: env["RUNNER_OS"] ?? platform,
+	workspace: env["GITHUB_WORKSPACE"] ?? cwd(),
+};
 
 export async function findConfigFiles(customPath?: string): Promise<string[]> {
-	const workspace = workspacePath();
+	const { workspace } = sys;
 	if (customPath !== undefined && customPath.trim() !== "") {
 		const pattern = isAbsolute(customPath) ? customPath : join(workspace, customPath);
 		const globber = await globCreate(pattern, { followSymbolicLinks: false });
@@ -41,7 +42,7 @@ export function computeCacheKey(
 	configPaths: readonly string[],
 	dprintVersion: string,
 ): { primaryKey: string; restoreKeys: string[] } {
-	const workspace = workspacePath();
+	const { workspace } = sys;
 	const hash = createHash("sha256");
 	for (const configPath of [...configPaths].sort()) {
 		const stablePath = relative(workspace, configPath).split(sep).join("/");
@@ -51,11 +52,10 @@ export function computeCacheKey(
 		hash.update("\0");
 	}
 	const digest = hash.digest("hex");
-	const runner = env["RUNNER_OS"] ?? platform;
-	const prefix = `dprint-plugins-v1-${runner}-${arch()}-${dprintVersion}`;
+	const prefix = `dprint-plugins-v1-${sys.platform}-${sys.arch}-${dprintVersion}`;
 
 	return {
 		primaryKey: `${prefix}-${digest}`,
-		restoreKeys: [`${prefix}-`, `dprint-plugins-v1-${runner}-${arch()}-`],
+		restoreKeys: [`${prefix}-`, `dprint-plugins-v1-${sys.platform}-${sys.arch}-`],
 	};
 }

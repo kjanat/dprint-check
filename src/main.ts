@@ -1,12 +1,13 @@
 import { isFeatureAvailable, restoreCache } from "@actions/cache";
-import { exportVariable, getInput, info, saveState, setFailed, setOutput, warning } from "@actions/core";
+import { exportVariable, getInput, info, saveState, setFailed, setOutput, setSecret, warning } from "@actions/core";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { env } from "node:process";
-import { checkFormatting } from "./check.ts";
-import { computeCacheKey, findConfigFiles } from "./config.ts";
-import { installDprint } from "./install.ts";
-import { warmupPlugins } from "./warmup.ts";
+
+import { checkFormatting } from "#lib/check";
+import { computeCacheKey, findConfigFiles } from "#lib/config";
+import { installDprint } from "#lib/install";
+import { warmupPlugins } from "#lib/warmup";
 
 function pluginCacheDir(): string {
 	return env["DPRINT_CACHE_DIR"] ?? join(homedir(), ".cache", "dprint");
@@ -53,6 +54,8 @@ async function restorePluginCache(
 async function run(): Promise<void> {
 	try {
 		const versionInput = getInput("dprint-version") || "latest";
+		const token = getInput("token");
+		if (token !== "") setSecret(token);
 		const configPathInput = getInput("config-path");
 		const additionalArgs = getInput("args", { trimWhitespace: false });
 		const cacheEnabled = getInput("cache") !== "false";
@@ -62,7 +65,7 @@ async function run(): Promise<void> {
 		setOutput("plugin-cache-hit", false);
 		setOutput("plugin-cache-key", "");
 
-		const { version, location } = await installDprint(versionInput, cacheEnabled);
+		const { version, location } = await installDprint(versionInput, cacheEnabled, token);
 		if (cacheEnabled && isFeatureAvailable()) {
 			await restorePluginCache(cacheDir, version, location, configPathInput);
 		} else if (cacheEnabled) warning("GitHub Actions cache is unavailable; skipping plugin cache");

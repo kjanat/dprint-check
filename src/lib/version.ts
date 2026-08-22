@@ -1,4 +1,8 @@
 import { HttpClient } from "@actions/http-client";
+import type { OutgoingHttpHeaders } from "node:http";
+
+const USER_AGENT = "dprint-check-action";
+const REPOSITORY = "dprint/dprint";
 
 export interface ReleaseAsset {
 	name: string;
@@ -9,6 +13,10 @@ export interface ReleaseAsset {
 export interface Release {
 	tag_name: string;
 	assets: ReleaseAsset[];
+}
+
+interface JsonClient {
+	getJson<T>(url: string, headers?: OutgoingHttpHeaders): Promise<{ statusCode: number; result: T | null }>;
 }
 
 export function specifiedVersion(input: string): string | undefined {
@@ -31,12 +39,26 @@ function isRelease(value: unknown): value is Release {
 		);
 }
 
-export async function resolveRelease(input: string): Promise<Release> {
+export async function resolveRelease(
+	input: string,
+	token = "",
+	http: JsonClient = new HttpClient(USER_AGENT),
+): Promise<Release> {
 	const requested = specifiedVersion(input);
 	const endpoint = requested === undefined
-		? "https://api.github.com/repos/dprint/dprint/releases/latest"
-		: `https://api.github.com/repos/dprint/dprint/releases/tags/${encodeURIComponent(requested)}`;
-	const response = await new HttpClient("dprint-check-action").getJson<unknown>(endpoint);
+		? `https://api.github.com/repos/${REPOSITORY}/releases/latest`
+		: `https://api.github.com/repos/${REPOSITORY}/releases/tags/${encodeURIComponent(requested)}`;
+	const headers: OutgoingHttpHeaders = {
+		accept: "application/vnd.github+json",
+		"x-github-api-version": "2022-11-28",
+	};
+	if (token !== "") headers.authorization = `Bearer ${token}`;
+	const response = await http.getJson<unknown>(endpoint, headers);
+	if (response.statusCode === 404) {
+		throw new Error(
+			requested === undefined ? "The latest dprint release was not found" : `dprint release ${requested} was not found`,
+		);
+	}
 	if (response.statusCode !== 200 || !isRelease(response.result)) {
 		throw new Error(`Failed to resolve dprint release ${requested ?? "latest"} (HTTP ${response.statusCode})`);
 	}
