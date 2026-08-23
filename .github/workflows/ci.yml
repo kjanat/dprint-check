@@ -17,6 +17,12 @@ jobs:
       - uses: oven-sh/setup-bun@v2
       - uses: kjanat/runner@master
       - run: runner i -f build
+      - name: Validate built action
+        run: |
+          foreach ($file in @("dist/main.mjs", "dist/post.mjs")) {
+            if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing $file" }
+            node --check $file
+          }
       - uses: kjanat/actionlint@v1
       - run: run -pk biome:check typecheck test
       - name: dprint check (action)

@@ -1,3 +1,4 @@
 bun.lock                           linguist-generated
 dist/**                            linguist-generated -diff
+SHA256SUMS                         linguist-generated -diff
 tests/fixtures/release-assets.json linguist-generated -diff

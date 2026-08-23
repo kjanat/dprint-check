@@ -53,6 +53,7 @@ export const DPRINT = {
 	command: {
 		check: "check",
 		config: "--config",
+		listDifferent: "--list-different",
 		version: "--version",
 		warmup: "output-file-paths",
 	},

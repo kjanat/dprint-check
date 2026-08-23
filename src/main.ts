@@ -15,14 +15,14 @@ import {
 	warning,
 } from "#lib/actions";
 import { isCacheAvailable, restoreCache } from "#lib/cache";
-import { checkFormatting } from "#lib/check";
+import { checkFormatting, isFormattingFailure } from "#lib/check";
 import { computeCacheKey, findConfigFiles, resolveConfigGraph } from "#lib/config";
 import { ACTION_INPUT, ACTION_OUTPUT, ACTION_STATE, ACTION_VALUE, DPRINT, ENVIRONMENT } from "#lib/contracts";
 import { describeError } from "#lib/error";
 import { installDprint } from "#lib/install";
 import { warmupPlugins } from "#lib/warmup";
 
-const pluginCacheDir = (): string =>                                                                                       env[ENVIRONMENT.dprintCacheDirectory] ?? join(homedir(), ".cache", DPRINT.name);
+const pluginCacheDir = (): string => env[ENVIRONMENT.dprintCacheDirectory] ?? join(homedir(), ".cache", DPRINT.name);
 
 const restorePluginCache = async (
 	cacheDir: string,
@@ -106,7 +106,8 @@ const run = async (): Promise<void> => {
 			await checkFormatting(location, configPathInput, additionalArgs, { annotations: annotationsEnabled });
 		} else info("dprint installed; check skipped because install-only is true");
 	} catch (error) {
-		setFailed(describeError(error));
+		if (isFormattingFailure(error)) process.exitCode = 1;
+		else setFailed(describeError(error));
 	}
 };
 

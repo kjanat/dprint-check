@@ -1,6 +1,7 @@
 import { describe, expect, mock, spyOn, test } from "bun:test";
+import { resolve } from "node:path";
 
-import { buildCheckArgs, checkFormatting, parseArgs, parseCheckAnnotations } from "#lib/check";
+import { buildCheckArgs, checkFormatting, isFormattingFailure, parseArgs, parseCheckAnnotations } from "#lib/check";
 import { DPRINT } from "#lib/contracts";
 import { TEST_DPRINT_BINARY } from "#test/helpers";
 
@@ -83,7 +84,7 @@ describe("parseCheckAnnotations", () => {
 	});
 
 	test("parses list-different output", () => {
-		expect(parseCheckAnnotations("src/first.ts\r\nsrc/second.ts\r\n", true)).toEqual([
+		expect(parseCheckAnnotations(`${resolve("src/first.ts")}\r\nsrc/second.ts\r\n`, true)).toEqual([
 			{ file: "src/first.ts" },
 			{ file: "src/second.ts" },
 		]);
@@ -117,19 +118,27 @@ test("annotates formatting failures and preserves the rejected error", async () 
 		stdout: "from src/example.ts:\n  7|-old\n7  |+new\n--\n",
 		stderr: "Found 1 not formatted file. Run dprint fmt to fix.\n",
 	});
-	const execute = mock(async () => Promise.reject(failure));
+	const listFailure = Object.assign(new Error("dprint check failed"), {
+		code: 20,
+		stdout: `${resolve("src/example.ts")}\n`,
+	});
+	const execute = mock(async () => Promise.reject(execute.mock.calls.length === 1 ? failure : listFailure));
 	const annotate = mock(() => {});
 	const stdout = spyOn(process.stdout, "write").mockImplementation(() => true);
 	const stderr = spyOn(process.stderr, "write").mockImplementation(() => true);
 
 	try {
 		expect(checkFormatting(TEST_DPRINT_BINARY, "", "", { execute, annotate })).rejects.toBe(failure);
+		expect(execute).toHaveBeenNthCalledWith(2, TEST_DPRINT_BINARY, [
+			DPRINT.command.check,
+			DPRINT.command.listDifferent,
+		], { maxBuffer: 64 * 1024 * 1024 });
 		expect(annotate).toHaveBeenCalledTimes(1);
 		expect(annotate).toHaveBeenCalledWith("File is not formatted. Run dprint fmt to fix.", {
 			file: "src/example.ts",
-			line: 7,
 			title: "dprint check",
 		});
+		expect(isFormattingFailure(failure)).toBeTrue();
 		expect(stdout).toHaveBeenCalledWith(failure.stdout);
 		expect(stderr).toHaveBeenCalledWith(failure.stderr);
 	} finally {
@@ -146,7 +155,9 @@ test("does not annotate non-formatting failures", async () => {
 
 	try {
 		expect(checkFormatting(TEST_DPRINT_BINARY, "", "", { execute, annotate })).rejects.toBe(failure);
+		expect(execute).toHaveBeenCalledTimes(1);
 		expect(annotate).not.toHaveBeenCalled();
+		expect(isFormattingFailure(failure)).toBeFalse();
 	} finally {
 		stderr.mockRestore();
 	}
@@ -165,7 +176,9 @@ test("can disable formatting annotations", async () => {
 		expect(checkFormatting(TEST_DPRINT_BINARY, "", "", { annotations: false, execute, annotate })).rejects.toBe(
 			failure,
 		);
+		expect(execute).toHaveBeenCalledTimes(1);
 		expect(annotate).not.toHaveBeenCalled();
+		expect(isFormattingFailure(failure)).toBeTrue();
 		expect(stdout).toHaveBeenCalledWith(failure.stdout);
 	} finally {
 		stdout.mockRestore();

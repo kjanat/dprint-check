@@ -1,7 +1,7 @@
 import { DPRINT, ENVIRONMENT } from "#lib/contracts";
 import { WARMUP_ATTEMPTS, WARMUP_MAX_BUFFER, WARMUP_TIMEOUT_MS, warmupPlugins } from "#lib/warmup";
 import { TEST_DPRINT_BINARY, useTestContext } from "#test/helpers";
-import { expect, mock, test } from "bun:test";
+import { expect, mock, spyOn, test } from "bun:test";
 
 const context = useTestContext();
 
@@ -67,9 +67,15 @@ test("stops after a non-timeout warmup failure", async () => {
 	const execute = mock(async () => {
 		throw new Error("invalid config");
 	});
+	const stdout = spyOn(process.stdout, "write").mockImplementation(() => true);
 
-	expect(await warmupPlugins(TEST_DPRINT_BINARY, ["one.json", "two.json"], execute)).toBeFalse();
-	expect(execute).toHaveBeenCalledTimes(1);
+	try {
+		expect(await warmupPlugins(TEST_DPRINT_BINARY, ["one.json", "two.json"], execute)).toBeFalse();
+		expect(execute).toHaveBeenCalledTimes(1);
+		expect(stdout).toHaveBeenCalledWith("::warning::Plugin warmup failed: invalid config\n");
+	} finally {
+		stdout.mockRestore();
+	}
 });
 
 test(`retries a hung warmup ${WARMUP_ATTEMPTS} times`, () => {

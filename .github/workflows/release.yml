@@ -1,0 +1,359 @@
+# yaml-language-server: $schema=https://www.schemastore.org/github-workflow.json
+---
+name: Release
+run-name: >-
+  ${{ github.event_name == 'workflow_dispatch'
+    && format('Prepare {0} from {1}', inputs.version, github.sha)
+    || format('Finalize {0}', github.event.release.tag_name) }}
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Stable semantic version to release (for example, v3.0.0)
+        required: true
+        type: string
+  release: { types: [published] }
+concurrency: { group: release, queue: single }
+permissions: { contents: read }
+env:
+  CANDIDATE_ARTIFACT: release-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+  DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+  SOURCE_SHA: ${{ github.sha }}
+  VERSION: ${{ inputs.version || github.event.release.tag_name }}
+defaults: { run: { shell: bash } }
+jobs:
+  build:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    outputs: { github-api-version: "${{ steps.github-api.outputs.version }}" }
+    permissions:
+      artifact-metadata: write
+      attestations: write
+      contents: read
+      id-token: write
+    steps:
+      - uses: &checkout-action actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with: { ref: "${{ env.SOURCE_SHA }}" }
+      - uses: &setup-bun-action oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with: { bun-version-file: package.json }
+      - name: Read GitHub API version
+        id: github-api
+        run: |
+          version="$(bun -e 'import { GITHUB_API } from "./src/lib/github.ts"; process.stdout.write(GITHUB_API.version)')"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+      - name: Validate release request
+        env:
+          GH_API_VERSION: "${{ steps.github-api.outputs.version }}"
+          GH_TOKEN: "${{ github.token }}"
+        run: |
+          set -euo pipefail
+          [[ "${VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "Version must be a stable semantic version prefixed with v" >&2
+            exit 1
+          }
+          [[ "${GITHUB_REF}" == "refs/heads/${DEFAULT_BRANCH}" ]] || {
+            echo "Releases must be prepared from ${DEFAULT_BRANCH}" >&2
+            exit 1
+          }
+          package_version="$(bun -e 'process.stdout.write((await Bun.file("package.json").json()).version)')"
+          [[ "${VERSION}" == "v${package_version}" ]] || {
+            echo "${VERSION} does not match package version ${package_version}" >&2
+            exit 1
+          }
+          verified="$(gh api \
+            -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
+            "repos/${GITHUB_REPOSITORY}/commits/${SOURCE_SHA}" \
+            --jq .commit.verification.verified)"
+          [[ "${verified}" == "true" ]] || {
+            echo "Source commit ${SOURCE_SHA} is not verified" >&2
+            exit 1
+          }
+          if gh release view "${VERSION}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+            echo "Release ${VERSION} already exists" >&2
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/${VERSION}" >/dev/null 2>&1; then
+            echo "Tag ${VERSION} already exists" >&2
+            exit 1
+          fi
+      - run: bun install --frozen-lockfile
+      - run: bun run check
+      - run: bun run build
+      - name: Hash release bundle
+        run: sha256sum dist/main.mjs dist/post.mjs > SHA256SUMS
+      - name: Attest release bundle
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with: { subject-checksums: SHA256SUMS }
+      - name: Upload release candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ env.CANDIDATE_ARTIFACT }}
+          path: |
+            dist/main.mjs
+            dist/post.mjs
+            SHA256SUMS
+          if-no-files-found: error
+          retention-days: 1
+
+  verify:
+    if: github.event_name == 'workflow_dispatch'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      attestations: read
+      contents: read
+    steps:
+      - uses: *checkout-action
+        with: { ref: "${{ env.SOURCE_SHA }}" }
+      - uses: *setup-bun-action
+        with: { bun-version-file: package.json }
+      - name: Download release candidate
+        uses: &download-artifact-action actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with: { name: "${{ env.CANDIDATE_ARTIFACT }}", path: candidate }
+      - name: Verify candidate checksums and provenance
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          set -euo pipefail
+          (cd candidate && sha256sum --check SHA256SUMS)
+          for file in candidate/dist/main.mjs candidate/dist/post.mjs; do
+            gh attestation verify "${file}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/release.yml" \
+              --source-digest "${SOURCE_SHA}" \
+              --source-ref "refs/heads/${DEFAULT_BRANCH}" \
+              --deny-self-hosted-runners
+          done
+      - run: bun install --frozen-lockfile
+      - name: Independently rebuild release bundle
+        run: |
+          set -euo pipefail
+          bun run build
+          cmp dist/main.mjs candidate/dist/main.mjs
+          cmp dist/post.mjs candidate/dist/post.mjs
+
+  draft:
+    if: github.event_name == 'workflow_dispatch'
+    needs: [build, verify]
+    runs-on: ubuntu-latest
+    permissions: { contents: write }
+    steps:
+      - name: Download verified release candidate
+        uses: *download-artifact-action
+        with: { name: "${{ env.CANDIDATE_ARTIFACT }}", path: candidate }
+      - name: Create signed release commit and draft
+        id: release
+        env:
+          GH_API_VERSION: "${{ needs.build.outputs.github-api-version }}"
+          GH_TOKEN: "${{ github.token }}"
+        run: |
+          set -euo pipefail
+          (cd candidate && sha256sum --check SHA256SUMS)
+
+          create_blob() {
+            local path="$1"
+            base64 --wrap=0 "${path}" > "${RUNNER_TEMP}/blob-content"
+            jq -n --rawfile content "${RUNNER_TEMP}/blob-content" \
+              '{content: $content, encoding: "base64"}' > "${RUNNER_TEMP}/blob-request.json"
+            gh api --method POST \
+              -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
+              "repos/${GITHUB_REPOSITORY}/git/blobs" \
+              --input "${RUNNER_TEMP}/blob-request.json" \
+              --jq .sha
+          }
+
+          main_blob="$(create_blob candidate/dist/main.mjs)"
+          post_blob="$(create_blob candidate/dist/post.mjs)"
+          sums_blob="$(create_blob candidate/SHA256SUMS)"
+          source_tree="$(gh api \
+            -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
+            "repos/${GITHUB_REPOSITORY}/git/commits/${SOURCE_SHA}" \
+            --jq .tree.sha)"
+
+          jq -n \
+            --arg base "${source_tree}" \
+            --arg main "${main_blob}" \
+            --arg post "${post_blob}" \
+            --arg sums "${sums_blob}" \
+            '{
+              base_tree: $base,
+              tree: [
+                {path: "dist/main.mjs", mode: "100644", type: "blob", sha: $main},
+                {path: "dist/post.mjs", mode: "100644", type: "blob", sha: $post},
+                {path: "SHA256SUMS", mode: "100644", type: "blob", sha: $sums}
+              ]
+            }' > "${RUNNER_TEMP}/tree-request.json"
+          release_tree="$(gh api --method POST \
+            -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
+            "repos/${GITHUB_REPOSITORY}/git/trees" \
+            --input "${RUNNER_TEMP}/tree-request.json" \
+            --jq .sha)"
+
+          jq -n \
+            --arg message "chore(release): build ${VERSION}
+
+          Source-Commit: ${SOURCE_SHA}" \
+            --arg tree "${release_tree}" \
+            --arg parent "${SOURCE_SHA}" \
+            '{message: $message, tree: $tree, parents: [$parent]}' \
+            > "${RUNNER_TEMP}/commit-request.json"
+          gh api --method POST \
+            -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
+            "repos/${GITHUB_REPOSITORY}/git/commits" \
+            --input "${RUNNER_TEMP}/commit-request.json" \
+            > "${RUNNER_TEMP}/release-commit.json"
+          release_sha="$(jq -r .sha < "${RUNNER_TEMP}/release-commit.json")"
+          verified="$(jq -r .verification.verified < "${RUNNER_TEMP}/release-commit.json")"
+          [[ "${verified}" == "true" ]] || {
+            echo "GitHub did not sign release commit ${release_sha}" >&2
+            exit 1
+          }
+
+          gh release create "${VERSION}" candidate/SHA256SUMS \
+            --repo "${GITHUB_REPOSITORY}" \
+            --target "${release_sha}" \
+            --title "${VERSION}" \
+            --generate-notes \
+            --draft
+          release_json="$(gh release view "${VERSION}" \
+            --repo "${GITHUB_REPOSITORY}" \
+            --json isDraft,tagName,targetCommitish,url)"
+          is_draft="$(jq -r .isDraft <<< "${release_json}")"
+          tag_name="$(jq -r .tagName <<< "${release_json}")"
+          target="$(jq -r .targetCommitish <<< "${release_json}")"
+          release_url="$(jq -r .url <<< "${release_json}")"
+          [[ "${is_draft}" == "true" ]]
+          [[ "${tag_name}" == "${VERSION}" ]]
+          [[ "${target}" == "${release_sha}" ]]
+          echo "release-sha=${release_sha}" >> "${GITHUB_OUTPUT}"
+          echo "Draft release: ${release_url}"
+      - name: Summarize release gate
+        env: { RELEASE_SHA: "${{ steps.release.outputs.release-sha }}" }
+        run: |
+          {
+            echo "## ${VERSION} is ready for review"
+            echo
+            echo "- Source commit: \`${SOURCE_SHA}\`"
+            echo "- Signed release commit: \`${RELEASE_SHA}\`"
+            echo "- Independent rebuild: byte-for-byte identical"
+            echo "- Bundle provenance: attested"
+            echo
+            echo "Publish the draft only after immutable releases are enabled."
+          } >> "${GITHUB_STEP_SUMMARY}"
+
+  verify-and-tag:
+    if: github.event_name == 'release'
+    runs-on: ubuntu-latest
+    permissions:
+      attestations: read
+      contents: write
+    steps:
+      - uses: *checkout-action
+        with:
+          fetch-depth: 0
+          path: release
+          ref: "${{ env.VERSION }}"
+      - uses: *setup-bun-action
+        with: { bun-version-file: release/package.json }
+      - name: Read GitHub API version
+        id: github-api
+        run: |
+          version="$(bun -e 'import { GITHUB_API } from "./release/src/lib/github.ts"; process.stdout.write(GITHUB_API.version)')"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+      - name: Verify immutable release and signed commit
+        id: release
+        env:
+          GH_API_VERSION: "${{ steps.github-api.outputs.version }}"
+          GH_TOKEN: "${{ github.token }}"
+        run: |
+          set -euo pipefail
+          [[ "${VERSION}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "Version must be a stable semantic version prefixed with v" >&2
+            exit 1
+          }
+          gh release verify "${VERSION}" --repo "${GITHUB_REPOSITORY}"
+          release_sha="$(git -C release rev-parse HEAD)"
+          source_sha="$(git -C release rev-parse HEAD^)"
+          trailer="$(git -C release log -1 --format='%(trailers:key=Source-Commit,valueonly)')"
+          [[ "${trailer}" == "${source_sha}" ]] || {
+            echo "Release source trailer does not match its parent" >&2
+            exit 1
+          }
+          verified="$(gh api \
+            -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
+            "repos/${GITHUB_REPOSITORY}/commits/${release_sha}" \
+            --jq .commit.verification.verified)"
+          [[ "${verified}" == "true" ]] || {
+            echo "Release commit ${release_sha} is not verified" >&2
+            exit 1
+          }
+          git -C release diff --name-only "${source_sha}" "${release_sha}" > "${RUNNER_TEMP}/changed-paths"
+          mapfile -t changed < "${RUNNER_TEMP}/changed-paths"
+          expected=(SHA256SUMS dist/main.mjs dist/post.mjs)
+          [[ "${changed[*]}" == "${expected[*]}" ]] || {
+            printf 'Unexpected release paths: %s\n' "${changed[*]}" >&2
+            exit 1
+          }
+          {
+            echo "release-sha=${release_sha}"
+            echo "source-sha=${source_sha}"
+            echo "major=${VERSION%%.*}"
+          } >> "${GITHUB_OUTPUT}"
+      - uses: *checkout-action
+        with:
+          path: source
+          ref: "${{ steps.release.outputs.source-sha }}"
+      - name: Verify checksums and provenance
+        env:
+          GH_TOKEN: "${{ github.token }}"
+          SOURCE_SHA: "${{ steps.release.outputs.source-sha }}"
+        run: |
+          set -euo pipefail
+          (cd release && sha256sum --check SHA256SUMS)
+          for file in release/dist/main.mjs release/dist/post.mjs; do
+            gh attestation verify "${file}" \
+              --repo "${GITHUB_REPOSITORY}" \
+              --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/release.yml" \
+              --source-digest "${SOURCE_SHA}" \
+              --source-ref "refs/heads/${DEFAULT_BRANCH}" \
+              --deny-self-hosted-runners
+          done
+      - run: bun install --frozen-lockfile
+        working-directory: source
+      - name: Rebuild from recorded source commit
+        run: |
+          set -euo pipefail
+          bun run build
+          cmp dist/main.mjs ../release/dist/main.mjs
+          cmp dist/post.mjs ../release/dist/post.mjs
+        working-directory: source
+      - name: Move floating major tag
+        env:
+          GH_API_VERSION: "${{ steps.github-api.outputs.version }}"
+          GH_TOKEN: "${{ github.token }}"
+          MAJOR: "${{ steps.release.outputs.major }}"
+          RELEASE_SHA: "${{ steps.release.outputs.release-sha }}"
+        run: |
+          set -euo pipefail
+          if gh api \
+            -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
+            "repos/${GITHUB_REPOSITORY}/git/ref/tags/${MAJOR}" >/dev/null 2>&1; then
+            gh api --method PATCH \
+              -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
+              "repos/${GITHUB_REPOSITORY}/git/refs/tags/${MAJOR}" \
+              -f sha="${RELEASE_SHA}" \
+              -F force=true >/dev/null
+          else
+            gh api --method POST \
+              -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
+              "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f ref="refs/tags/${MAJOR}" \
+              -f sha="${RELEASE_SHA}" >/dev/null
+          fi
+          actual="$(gh api \
+            -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
+            "repos/${GITHUB_REPOSITORY}/git/ref/tags/${MAJOR}" \
+            --jq .object.sha)"
+          [[ "${actual}" == "${RELEASE_SHA}" ]] || {
+            echo "${MAJOR} points to ${actual}, expected ${RELEASE_SHA}" >&2
+            exit 1
+          }

@@ -1,7 +1,9 @@
+import { isAbsolute, relative, sep } from "node:path";
+import { cwd, env } from "node:process";
 import { stripVTControlCharacters } from "node:util";
 
 import { error as annotateError } from "#lib/actions";
-import { DPRINT } from "#lib/contracts";
+import { DPRINT, ENVIRONMENT } from "#lib/contracts";
 import { execFileAsync } from "#lib/exec";
 
 interface CheckAnnotation {
@@ -26,6 +28,7 @@ type Annotate = (message: string, properties: CheckAnnotation & { title: string 
 const CHECK_MAX_BUFFER = 64 * 1024 * 1024;
 const ANNOTATION_MESSAGE = "File is not formatted. Run dprint fmt to fix.";
 const ANNOTATION_TITLE = "dprint check";
+const formattingFailures = new WeakSet<object>();
 
 const asOutput = (value: unknown): ExecutionOutput => typeof value === "object" && value !== null ? value : {};
 
@@ -43,9 +46,15 @@ const originalLine = (line: string): number | undefined => {
 	return numbers === null ? undefined : Number(numbers.at(-1));
 };
 
+const annotationPath = (file: string): string => {
+	if (!isAbsolute(file)) return file;
+	const path = relative(env[ENVIRONMENT.githubWorkspace] ?? cwd(), file);
+	return path !== "" && path !== ".." && !path.startsWith(`..${sep}`) && !isAbsolute(path) ? path : file;
+};
+
 export const parseCheckAnnotations = (output: string, listDifferent: boolean): CheckAnnotation[] => {
 	const lines = stripVTControlCharacters(output).split(/\r?\n/u);
-	if (listDifferent) return lines.filter((line) => line !== "").map((file) => ({ file }));
+	if (listDifferent) return lines.filter((line) => line !== "").map((file) => ({ file: annotationPath(file) }));
 
 	const annotations: CheckAnnotation[] = [];
 	let current: CheckAnnotation | undefined;
@@ -75,6 +84,25 @@ const exitCode = (error: unknown): number | string | undefined => {
 	if (typeof error !== "object" || error === null || !("code" in error)) return undefined;
 	return typeof error.code === "number" || typeof error.code === "string" ? error.code : undefined;
 };
+
+const isCheckFailure = (error: unknown): error is object =>
+	typeof error === "object" && error !== null && Number(exitCode(error)) === DPRINT.checkFailureExitCode;
+
+const listDifferent = async (binaryPath: string, args: string[], execute: Execute): Promise<ExecutionOutput> => {
+	const listArgs = args.includes(DPRINT.command.listDifferent) ? args : [...args, DPRINT.command.listDifferent];
+	try {
+		return asOutput(
+			await execute(binaryPath, listArgs, {
+				maxBuffer: CHECK_MAX_BUFFER,
+			}),
+		);
+	} catch (error) {
+		return isCheckFailure(error) ? asOutput(error) : {};
+	}
+};
+
+export const isFormattingFailure = (error: unknown): boolean =>
+	typeof error === "object" && error !== null && formattingFailures.has(error);
 
 export const parseArgs = (input: string): string[] => {
 	const args: string[] = [];
@@ -142,8 +170,11 @@ export const checkFormatting = async (
 	} catch (error) {
 		const output = asOutput(error);
 		writeOutput(output);
-		if (annotations && Number(exitCode(error)) === DPRINT.checkFailureExitCode) {
-			for (const properties of parseCheckAnnotations(outputText(output.stdout), args.includes("--list-different"))) {
+		if (isCheckFailure(error)) {
+			formattingFailures.add(error);
+			if (!annotations) throw error;
+			const listed = await listDifferent(binaryPath, args, execute);
+			for (const properties of parseCheckAnnotations(outputText(listed.stdout), true)) {
 				annotate(ANNOTATION_MESSAGE, { ...properties, title: ANNOTATION_TITLE });
 			}
 		}
