@@ -1,15 +1,15 @@
-import { addPath, debug, info, saveState, setOutput, warning } from "@actions/core";
-import { exec } from "@actions/exec";
-import { cp, mkdirP } from "@actions/io";
-import { cacheDir, downloadTool, extractZip, find as findTool } from "@actions/tool-cache";
 import { existsSync } from "node:fs";
+import { cp, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { env } from "node:process";
 
+import { addPath, debug, info, saveState, setOutput, warning } from "#lib/actions";
 import { isCacheAvailable, restoreCache } from "#lib/cache";
 import { resolveReleaseAssetChecksum, verifyReleaseAsset } from "#lib/checksum";
+import { execFileAsync } from "#lib/exec";
 import { resolveRuntimePlatform, selectReleaseAsset } from "#lib/platform";
+import { cacheToolDirectory, downloadTool, extractZip, findTool } from "#lib/tool";
 import type { Release, ReleaseAsset } from "#lib/version";
 import { resolveRelease, specifiedVersion } from "#lib/version";
 
@@ -85,12 +85,12 @@ export async function installDprint(versionInput: string, cacheEnabled: boolean,
 	const extractedDir = await extractZip(zipPath);
 	const extractedBinary = join(extractedDir, `dprint${extension}`);
 	debug(`Extracted ${asset.name} to ${extractedDir}`);
-	if (target.os !== "win32") await exec("chmod", ["+x", extractedBinary]);
+	if (target.os !== "win32") await execFileAsync("chmod", ["+x", extractedBinary]);
 
-	await mkdirP(binDir);
+	await mkdir(binDir, { recursive: true });
 	await cp(extractedBinary, binaryPath);
 	if (cacheEnabled) {
-		await cacheDir(extractedDir, "dprint", version, target.cacheKey);
+		await cacheToolDirectory(extractedDir, "dprint", version, target.cacheKey);
 		debug(`Stored dprint ${version} in tool-cache for ${target.cacheKey}`);
 	}
 
@@ -108,10 +108,8 @@ async function finalize(
 ): Promise<{ version: string; location: string; cacheHit: boolean; platformKey: string }> {
 	addPath(dirname(binaryPath));
 	debug(`Verifying installed binary: ${binaryPath} --version`);
-	let output = "";
-	await exec(binaryPath, ["--version"], {
-		listeners: { stdout: (data: Buffer) => output += data.toString() },
-	});
+	const { stdout } = await execFileAsync(binaryPath, ["--version"]);
+	const output = String(stdout);
 	const version = output.trim().split(" ").pop() ?? output.trim();
 	setOutput("version", version);
 	setOutput("location", binaryPath);

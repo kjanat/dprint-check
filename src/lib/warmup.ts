@@ -1,6 +1,6 @@
-import { info, warning } from "@actions/core";
 import { dirname } from "node:path";
 
+import { info, warning } from "#lib/actions";
 import { execFileAsync } from "#lib/exec";
 
 const ATTEMPTS = 3;

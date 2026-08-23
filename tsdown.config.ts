@@ -4,6 +4,11 @@ const shared = {
 	minify: "dce-only",
 	clean: true,
 	target: "node24",
+	platform: "node",
+	env: {
+		NODE_ENV: "production",
+	},
+	treeshake: true,
 	deps: {
 		alwaysBundle: [/.*/],
 		onlyBundle: false,

@@ -1,4 +1,3 @@
-import { debug, setSecret } from "@actions/core";
 import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
 import { mkdir, mkdtemp, open, rm, stat, writeFile } from "node:fs/promises";
@@ -8,6 +7,7 @@ import { env as processEnv } from "node:process";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
+import { debug, setSecret } from "#lib/actions";
 import { execFileAsync } from "#lib/exec";
 
 const SERVICE = "github.actions.results.api.v1.CacheService";

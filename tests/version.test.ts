@@ -49,6 +49,7 @@ describe("resolveRelease", () => {
 			url: "https://api.github.com/repos/dprint/dprint/releases/tags/0.56.1",
 			headers: {
 				accept: "application/vnd.github+json",
+				"user-agent": "dprint-check-action",
 				"x-github-api-version": "2026-03-10",
 				authorization: "Bearer test-token",
 			},
@@ -63,6 +64,7 @@ describe("resolveRelease", () => {
 			url: "https://api.github.com/repos/dprint/dprint/releases/latest",
 			headers: {
 				accept: "application/vnd.github+json",
+				"user-agent": "dprint-check-action",
 				"x-github-api-version": "2026-03-10",
 			},
 		}]);

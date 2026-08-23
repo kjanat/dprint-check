@@ -1,5 +1,4 @@
-import { debug, getState, info, warning } from "@actions/core";
-
+import { debug, getState, info, warning } from "#lib/actions";
 import { isCacheAvailable, saveCache } from "#lib/cache";
 
 async function save(paths: string[], key: string, label: string): Promise<void> {

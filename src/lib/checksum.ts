@@ -1,8 +1,8 @@
-import { downloadTool } from "@actions/tool-cache";
 import { createHash } from "node:crypto";
 import { createReadStream } from "node:fs";
 import { readFile } from "node:fs/promises";
 
+import { downloadTool } from "#lib/tool";
 import type { ReleaseAsset } from "#lib/version";
 
 function digestFromAsset(asset: ReleaseAsset): string | undefined {

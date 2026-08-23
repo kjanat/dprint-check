@@ -1,3 +1,7 @@
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { env } from "node:process";
+
 import {
 	debug,
 	exportVariable,
@@ -8,11 +12,7 @@ import {
 	setOutput,
 	setSecret,
 	warning,
-} from "@actions/core";
-import { homedir } from "node:os";
-import { join } from "node:path";
-import { env } from "node:process";
-
+} from "#lib/actions";
 import { isCacheAvailable, restoreCache } from "#lib/cache";
 import { checkFormatting } from "#lib/check";
 import { computeCacheKey, findConfigFiles } from "#lib/config";

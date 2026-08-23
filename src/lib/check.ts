@@ -1,4 +1,4 @@
-import { exec } from "@actions/exec";
+import { execFileAsync } from "#lib/exec";
 
 type Execute = (commandLine: string, args: string[]) => Promise<unknown>;
 
@@ -59,7 +59,7 @@ export async function checkFormatting(
 	binaryPath: string,
 	configPath: string,
 	additionalArgs: string,
-	execute: Execute = exec,
+	execute: Execute = execFileAsync,
 ): Promise<void> {
 	await execute(binaryPath, buildCheckArgs(configPath, additionalArgs));
 }

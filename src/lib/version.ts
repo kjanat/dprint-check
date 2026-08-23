@@ -1,4 +1,3 @@
-import { HttpClient } from "@actions/http-client";
 import type { OutgoingHttpHeaders } from "node:http";
 
 const USER_AGENT = "dprint-check-action";
@@ -18,6 +17,17 @@ export interface Release {
 interface JsonClient {
 	getJson<T>(url: string, headers?: OutgoingHttpHeaders): Promise<{ statusCode: number; result: T | null }>;
 }
+
+const jsonClient: JsonClient = {
+	async getJson<T>(url: string, headers: OutgoingHttpHeaders = {}) {
+		const requestHeaders = new Headers();
+		for (const [name, value] of Object.entries(headers)) {
+			if (value !== undefined) requestHeaders.set(name, Array.isArray(value) ? value.join(", ") : String(value));
+		}
+		const response = await fetch(url, { headers: requestHeaders });
+		return { statusCode: response.status, result: await response.json() as T };
+	},
+};
 
 export function specifiedVersion(input: string): string | undefined {
 	const requested = input.trim();
@@ -42,7 +52,7 @@ function isRelease(value: unknown): value is Release {
 export async function resolveRelease(
 	input: string,
 	token = "",
-	http: JsonClient = new HttpClient(USER_AGENT),
+	http: JsonClient = jsonClient,
 ): Promise<Release> {
 	const requested = specifiedVersion(input);
 	const endpoint = requested === undefined
@@ -50,6 +60,7 @@ export async function resolveRelease(
 		: `https://api.github.com/repos/${REPOSITORY}/releases/tags/${encodeURIComponent(requested)}`;
 	const headers: OutgoingHttpHeaders = {
 		accept: "application/vnd.github+json",
+		"user-agent": USER_AGENT,
 		"x-github-api-version": "2026-03-10",
 	};
 	if (token !== "") headers.authorization = `Bearer ${token}`;

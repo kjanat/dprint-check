@@ -5,19 +5,18 @@ import type { ReleaseAsset } from "#lib/version";
 import releaseHistory from "./fixtures/release-assets.json" with { type: "json" };
 
 async function targetForAsset(assetName: string) {
-	const match = /^dprint-(x86_64|aarch64|riscv64gc|loongarch64|powerpc64le)-(.+)\.zip$/u.exec(assetName);
+	const match = /^dprint-(?<architecture>x86_64|aarch64|riscv64gc|loongarch64|powerpc64le)-(?<platform>.+)\.zip$/u.exec(
+		assetName,
+	);
 	if (match === null) return undefined;
 
-	const architecture = match[1];
-	const platform = match[2];
-	const cpu = architecture === "x86_64"
-		? "x64"
-		: architecture === "aarch64"
-		? "arm64"
-		: architecture === "riscv64gc"
-		? "riscv64"
-		: architecture === "loongarch64"
-		? "loong64"
+	const architecture = match.groups?.architecture;
+	const platform = match.groups?.platform;
+	const cpu = // dprint-ignore
+		architecture === "x86_64" ? "x64"
+		: architecture === "aarch64" ? "arm64"
+		: architecture === "riscv64gc" ? "riscv64"
+		: architecture === "loongarch64" ? "loong64"
 		: "ppc64";
 	const byteOrder = architecture === "powerpc64le" ? "LE" as const : undefined;
 
