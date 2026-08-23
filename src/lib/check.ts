@@ -69,7 +69,7 @@ export const parseCheckAnnotations = (output: string, listDifferent: boolean): C
 			const file = header[1];
 			if (file === undefined) continue;
 			finish();
-			current = { file };
+			current = { file: annotationPath(file) };
 		} else if (line === "--") finish();
 		else if (current !== undefined && current.line === undefined) {
 			const lineNumber = originalLine(line);
@@ -173,9 +173,19 @@ export const checkFormatting = async (
 		if (isCheckFailure(error)) {
 			formattingFailures.add(error);
 			if (!annotations) throw error;
+			const diffLines = new Map(
+				parseCheckAnnotations(outputText(output.stdout), false)
+					.filter((annotation): annotation is CheckAnnotation & { line: number } => annotation.line !== undefined)
+					.map(({ file, line }) => [file, line]),
+			);
 			const listed = await listDifferent(binaryPath, args, execute);
 			for (const properties of parseCheckAnnotations(outputText(listed.stdout), true)) {
-				annotate(ANNOTATION_MESSAGE, { ...properties, title: ANNOTATION_TITLE });
+				const line = diffLines.get(properties.file);
+				annotate(ANNOTATION_MESSAGE, {
+					...properties,
+					...(line === undefined ? {} : { line }),
+					title: ANNOTATION_TITLE,
+				});
 			}
 		}
 		throw error;

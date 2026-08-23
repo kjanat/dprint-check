@@ -147,7 +147,7 @@ test("annotates formatting failures and preserves the rejected error", async () 
 	});
 	const listFailure = Object.assign(new Error("dprint check failed"), {
 		code: 20,
-		stdout: `${resolve("src/example.ts")}\n`,
+		stdout: `${resolve("src/example.ts")}\n${resolve("src/no-stable-line.ts")}\n`,
 	});
 	const execute = mock(async () => Promise.reject(execute.mock.calls.length === 1 ? failure : listFailure));
 	const annotate = mock(() => {});
@@ -160,9 +160,14 @@ test("annotates formatting failures and preserves the rejected error", async () 
 			DPRINT.command.check,
 			DPRINT.command.listDifferent,
 		], { maxBuffer: 64 * 1024 * 1024 });
-		expect(annotate).toHaveBeenCalledTimes(1);
-		expect(annotate).toHaveBeenCalledWith("File is not formatted. Run dprint fmt to fix.", {
+		expect(annotate).toHaveBeenCalledTimes(2);
+		expect(annotate).toHaveBeenNthCalledWith(1, "File is not formatted. Run dprint fmt to fix.", {
 			file: "src/example.ts",
+			line: 7,
+			title: "dprint check",
+		});
+		expect(annotate).toHaveBeenNthCalledWith(2, "File is not formatted. Run dprint fmt to fix.", {
+			file: "src/no-stable-line.ts",
 			title: "dprint check",
 		});
 		expect(isFormattingFailure(failure)).toBeTrue();
