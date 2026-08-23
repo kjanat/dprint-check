@@ -254,7 +254,7 @@ jobs:
         with:
           fetch-depth: 0
           path: release
-          ref: "${{ env.VERSION }}"
+          ref: "refs/tags/${{ env.VERSION }}"
       - uses: *setup-bun-action
         with: { bun-version-file: release/package.json }
       - name: Read GitHub API version
@@ -331,6 +331,16 @@ jobs:
           cmp dist/main.mjs ../release/dist/main.mjs
           cmp dist/post.mjs ../release/dist/post.mjs
         working-directory: source
+      - name: Verify published checksum asset
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: |
+          set -euo pipefail
+          mkdir published
+          gh release download "${VERSION}" \
+            --pattern SHA256SUMS \
+            --dir published
+          gh release verify-asset "${VERSION}" published/SHA256SUMS
+          cmp release/SHA256SUMS published/SHA256SUMS
       - name: Move floating major tag
         env:
           GH_API_VERSION: "${{ steps.github-api.outputs.version }}"
