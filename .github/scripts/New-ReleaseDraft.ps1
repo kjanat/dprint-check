@@ -11,6 +11,7 @@ $sourceSha = Get-RequiredEnvironmentVariable 'SOURCE_SHA'
 $defaultBranch = Get-RequiredEnvironmentVariable 'DEFAULT_BRANCH'
 $repository = Get-RequiredEnvironmentVariable 'GH_REPO'
 $serverUrl = Get-RequiredEnvironmentVariable 'GITHUB_SERVER_URL'
+$attestationUrl = Get-RequiredEnvironmentVariable 'ATTESTATION_URL'
 $null = Assert-StableReleaseVersion $version
 Assert-ReleaseChecksum -Root candidate
 
@@ -30,7 +31,7 @@ if ($defaultSha -ne $sourceSha) {
 }
 
 $releaseCommit = Invoke-GitHubApi -Method POST -Path 'repos/{owner}/{repo}/git/commits' -Body @{
-	message = "chore(release): build $version`n`nSource-Commit: $sourceSha"
+	message = "chore(release): build $version`n`nSource-Commit: $sourceSha`nAttestation-URL: $attestationUrl"
 	tree    = $releaseTree
 	parents = @($sourceSha)
 }
@@ -81,13 +82,13 @@ Add-GitHubOutput 'release-sha' $releaseSha
 Add-GitHubOutput 'release-url' $release.url
 
 $summaryPath = Get-RequiredEnvironmentVariable 'GITHUB_STEP_SUMMARY'
-$attestationUrl = Get-RequiredEnvironmentVariable 'ATTESTATION_URL'
 $runNumber = Get-RequiredEnvironmentVariable 'GITHUB_RUN_NUMBER'
 $runId = Get-RequiredEnvironmentVariable 'GITHUB_RUN_ID'
+$releaseUrl = "$serverUrl/$repository/releases/tag/$version"
 $summary = @"
 ## $version is ready for review
 
-- Draft release: [Review $version]($($release.url))
+- Draft release: [Review $version]($releaseUrl)
 - Source commit: [$($sourceSha.Substring(0, 7))]($serverUrl/$repository/commit/$sourceSha)
 - Signed release commit: [$($releaseSha.Substring(0, 7))]($serverUrl/$repository/commit/$releaseSha)
 - Tagged Action tree: [$version]($serverUrl/$repository/tree/$version) (available after publication)

@@ -10,6 +10,7 @@ $version = Get-RequiredEnvironmentVariable 'VERSION'
 $owner = Get-RequiredEnvironmentVariable 'OWNER'
 $repository = Get-RequiredEnvironmentVariable 'GH_REPO'
 $defaultBranch = Get-RequiredEnvironmentVariable 'DEFAULT_BRANCH'
+$serverUrl = Get-RequiredEnvironmentVariable 'GITHUB_SERVER_URL'
 $releaseVersion = Assert-StableReleaseVersion $version
 
 gh release verify $version
@@ -22,6 +23,10 @@ $sourceSha = $parents[1]
 $trailer = (git -C release log -1 '--format=%(trailers:key=Source-Commit,valueonly)').Trim()
 if ($trailer -ne $sourceSha) {
 	Write-ReleaseError "Release source trailer does not match its parent"
+}
+$attestationUrl = (git -C release log -1 '--format=%(trailers:key=Attestation-URL,valueonly)').Trim()
+if ($attestationUrl -notmatch "^$([regex]::Escape("$serverUrl/$repository"))/attestations/\d+$") {
+	Write-ReleaseError "Release commit has an invalid attestation URL"
 }
 $commit = Invoke-GitHubApi -Path "repos/{owner}/{repo}/commits/$releaseSha"
 if (-not $commit.commit.verification.verified) {
@@ -85,3 +90,22 @@ if ($latestMajor -eq $version) {
 else {
 	Write-Output "Leaving $major unchanged; latest stable release is $($latestMajor ?? 'none')"
 }
+
+$summaryPath = Get-RequiredEnvironmentVariable 'GITHUB_STEP_SUMMARY'
+$runNumber = Get-RequiredEnvironmentVariable 'GITHUB_RUN_NUMBER'
+$runId = Get-RequiredEnvironmentVariable 'GITHUB_RUN_ID'
+$releaseUrl = "$serverUrl/$repository/releases/tag/$version"
+$summary = @"
+## $version finalized
+
+- Release: [$version]($releaseUrl)
+- Tagged Action tree: [$version]($serverUrl/$repository/tree/$version)
+- Source commit: [$($sourceSha.Substring(0, 7))]($serverUrl/$repository/commit/$sourceSha)
+- Signed release commit: [$($releaseSha.Substring(0, 7))]($serverUrl/$repository/commit/$releaseSha)
+- Bundle provenance: [view attestation]($attestationUrl)
+- Published assets: checksums and release attestations verified
+- Independent rebuild: byte-for-byte identical
+- Floating tags: [$major]($serverUrl/$repository/tree/$major), [$minor]($serverUrl/$repository/tree/$minor)
+- Finalization run: [#$runNumber]($serverUrl/$repository/actions/runs/$runId)
+"@
+[IO.File]::AppendAllText($summaryPath, $summary, [Text.UTF8Encoding]::new($false))
