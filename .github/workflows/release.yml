@@ -184,6 +184,15 @@ jobs:
             --input "${RUNNER_TEMP}/tree-request.json" \
             --jq .sha)"
 
+          default_sha="$(gh api \
+            -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
+            "repos/{owner}/{repo}/git/ref/heads/${DEFAULT_BRANCH}" \
+            --jq .object.sha)"
+          [[ "${default_sha}" == "${SOURCE_SHA}" ]] || {
+            echo "Default branch advanced from ${SOURCE_SHA} to ${default_sha}" >&2
+            exit 1
+          }
+
           jq -n \
             --arg message "chore(release): build ${VERSION}
 
@@ -280,13 +289,15 @@ jobs:
             echo "Release commit ${release_sha} is not verified" >&2
             exit 1
           }
-          git -C release diff --name-only "${source_sha}" "${release_sha}" > "${RUNNER_TEMP}/changed-paths"
-          mapfile -t changed < "${RUNNER_TEMP}/changed-paths"
-          expected=(SHA256SUMS dist/main.mjs dist/post.mjs)
-          [[ "${changed[*]}" == "${expected[*]}" ]] || {
-            printf 'Unexpected release paths: %s\n' "${changed[*]}" >&2
+          git -C release diff --name-only "${source_sha}" "${release_sha}" \
+            | sort > "${RUNNER_TEMP}/changed-paths"
+          printf '%s\n' SHA256SUMS dist/main.mjs dist/post.mjs \
+            | sort > "${RUNNER_TEMP}/expected-paths"
+          if ! cmp "${RUNNER_TEMP}/expected-paths" "${RUNNER_TEMP}/changed-paths"; then
+            echo "Unexpected release paths:" >&2
+            sed 's/^/  /' "${RUNNER_TEMP}/changed-paths" >&2
             exit 1
-          }
+          fi
           {
             echo "release-sha=${release_sha}"
             echo "source-sha=${source_sha}"
