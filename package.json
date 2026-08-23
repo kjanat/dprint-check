@@ -18,8 +18,9 @@
 	"repository": "https://github.com/dprint/check",
 	"scripts": {
 		"biome:check": "biome check",
-		"build": "tsdown",
-		"check": "run --sequential fmt:check biome:check typecheck test",
+		"build": "run --runtime=bun tsdown",
+		"build:watch": "run -q build --watch",
+		"check": "run --parallel fmt:check biome:check typecheck test",
 		"fmt": "run -q dprint fmt",
 		"fmt:check": "run -q dprint check",
 		"test": "bun test",

@@ -80,7 +80,10 @@ interface FinalizeResponse {
 
 const environment = (options: CacheOptions): Environment => options.environment ?? processEnv;
 
-const cacheModeAllows = (mode: string | undefined, operation: typeof CACHE_MODE.read | typeof CACHE_MODE.write): boolean => {
+const cacheModeAllows = (
+	mode: string | undefined,
+	operation: typeof CACHE_MODE.read | typeof CACHE_MODE.write,
+): boolean => {
 	const normalized = mode?.trim().toLowerCase();
 	if (normalized === undefined || !CACHE_MODES.includes(normalized)) return true;
 	if (operation === CACHE_MODE.read) return normalized === CACHE_MODE.read || normalized === CACHE_MODE.write;
