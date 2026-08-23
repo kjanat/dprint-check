@@ -2,10 +2,28 @@ import { describe, expect, mock, test } from "bun:test";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
-import { cacheVersion, isCacheAvailable, restoreCache, saveCache } from "#lib/cache";
+import {
+	AZURE_STORAGE_API_VERSION,
+	CACHE_COMPRESSION,
+	CACHE_MODE,
+	CACHE_SERVICE_METHOD,
+	cacheVersion,
+	isCacheAvailable,
+	restoreCache,
+	saveCache,
+} from "#lib/cache";
+import { ENVIRONMENT } from "#lib/contracts";
+import { GITHUB_API } from "#lib/github";
 import { useTestContext } from "#test/helpers";
 
 const context = useTestContext();
+const RESULTS_URL = "https://results.example/";
+const RUNTIME_TOKEN = "runtime-token";
+const BLOB_URL = `https://blob.example/cache?sv=${AZURE_STORAGE_API_VERSION}`;
+const cacheServiceEnvironment = {
+	[ENVIRONMENT.actionsResultsUrl]: RESULTS_URL,
+	[ENVIRONMENT.actionsRuntimeToken]: RUNTIME_TOKEN,
+};
 
 describe("cache availability", () => {
 	test.each(
@@ -13,23 +31,24 @@ describe("cache availability", () => {
 			{
 				name: "GitHub-hosted v2 service",
 				environment: {
-					GITHUB_SERVER_URL: "https://github.com",
-					ACTIONS_RESULTS_URL: "https://results.example/",
-					ACTIONS_RUNTIME_TOKEN: "token",
+					[ENVIRONMENT.githubServerUrl]: GITHUB_API.webUrl,
+					...cacheServiceEnvironment,
 				},
 				expected: true,
 			},
 			{
 				name: "missing runtime token",
-				environment: { GITHUB_SERVER_URL: "https://github.com", ACTIONS_RESULTS_URL: "https://results.example/" },
+				environment: {
+					[ENVIRONMENT.githubServerUrl]: GITHUB_API.webUrl,
+					[ENVIRONMENT.actionsResultsUrl]: RESULTS_URL,
+				},
 				expected: false,
 			},
 			{
 				name: "GHES v1 service",
 				environment: {
-					GITHUB_SERVER_URL: "https://github.example.com",
-					ACTIONS_RESULTS_URL: "https://results.example/",
-					ACTIONS_RUNTIME_TOKEN: "token",
+					[ENVIRONMENT.githubServerUrl]: "https://github.example.com",
+					...cacheServiceEnvironment,
 				},
 				expected: false,
 			},
@@ -39,7 +58,7 @@ describe("cache availability", () => {
 	});
 
 	test("matches actions/cache's version hash", () => {
-		expect(cacheVersion(["/workspace/.cache/dprint"], "zstd-without-long")).toBe(
+		expect(cacheVersion(["/workspace/.cache/dprint"], CACHE_COMPRESSION.zstd)).toBe(
 			"979a993c2384ea042ce6dd2bd47ca935ddb2248a5a8759bd4fdd358701a07242",
 		);
 	});
@@ -62,14 +81,14 @@ test("saves and restores an exact directory through the v2 protocol", async () =
 		if (url.hostname === "results.example") {
 			const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
 			serviceRequests.push({ method, body });
-			if (method === "CreateCacheEntry") {
-				return Response.json({ ok: true, signed_upload_url: "https://blob.example/cache?sv=2021-12-02" });
+			if (method === CACHE_SERVICE_METHOD.create) {
+				return Response.json({ ok: true, signed_upload_url: BLOB_URL });
 			}
-			if (method === "FinalizeCacheEntryUpload") return Response.json({ ok: true, entry_id: "1" });
-			if (method === "GetCacheEntryDownloadURL") {
+			if (method === CACHE_SERVICE_METHOD.finalize) return Response.json({ ok: true, entry_id: "1" });
+			if (method === CACHE_SERVICE_METHOD.restore) {
 				return Response.json({
 					ok: true,
-					signed_download_url: "https://blob.example/cache?sv=2021-12-02",
+					signed_download_url: BLOB_URL,
 					matched_key: "plugin-cache-restore-hit",
 				});
 			}
@@ -87,11 +106,10 @@ test("saves and restores an exact directory through the v2 protocol", async () =
 		return new Response(null, { status: 404 });
 	});
 	const environment = {
-		GITHUB_SERVER_URL: "https://github.com",
-		GITHUB_WORKSPACE: workspace,
-		RUNNER_TEMP: join(root, "temp"),
-		ACTIONS_RESULTS_URL: "https://results.example/",
-		ACTIONS_RUNTIME_TOKEN: "runtime-token",
+		[ENVIRONMENT.githubServerUrl]: GITHUB_API.webUrl,
+		[ENVIRONMENT.githubWorkspace]: workspace,
+		[ENVIRONMENT.runnerTemporaryDirectory]: join(root, "temp"),
+		...cacheServiceEnvironment,
 	};
 	const options = { debug: mock(() => {}), environment, fetch, maskSecret: mock(() => {}) };
 
@@ -102,9 +120,9 @@ test("saves and restores an exact directory through the v2 protocol", async () =
 	);
 	expect(await readFile(join(cachePath, "plugin.wasm"), "utf8")).toBe("cached plugin");
 	expect(serviceRequests.map(request => request.method)).toEqual([
-		"CreateCacheEntry",
-		"FinalizeCacheEntryUpload",
-		"GetCacheEntryDownloadURL",
+		CACHE_SERVICE_METHOD.create,
+		CACHE_SERVICE_METHOD.finalize,
+		CACHE_SERVICE_METHOD.restore,
 	]);
 	expect(serviceRequests[2]?.body).toMatchObject({
 		key: "plugin-cache-primary",
@@ -123,7 +141,7 @@ test("honors cache-mode before executing or requesting anything", async () => {
 	const fetch = mock(async () => {
 		throw new Error("should not fetch");
 	});
-	const environment = { ACTIONS_CACHE_MODE: "none" };
+	const environment = { [ENVIRONMENT.actionsCacheMode]: CACHE_MODE.none };
 
 	expect(restoreCache(["cache"], "key", [], { environment, execute, fetch })).resolves.toBeUndefined();
 	expect(saveCache(["cache"], "key", { environment, execute, fetch })).resolves.toBeUndefined();
@@ -138,10 +156,7 @@ test.each([408, 429, 503])("retries transient HTTP %i cache-service failures", s
 	const execute = mock(async () => {});
 	const sleep = mock(async () => {});
 	const debug = mock(() => {});
-	const environment = {
-		ACTIONS_RESULTS_URL: "https://results.example/",
-		ACTIONS_RUNTIME_TOKEN: "runtime-token",
-	};
+	const environment = cacheServiceEnvironment;
 
 	expect(restoreCache(["cache"], "key", [], { debug, environment, execute, fetch, sleep })).resolves
 		.toBeUndefined();
@@ -154,10 +169,7 @@ test("does not retry cache-service authorization failures", () => {
 	const fetch = mock(async () => Response.json({ msg: "cache read denied" }, { status: 403 }));
 	const execute = mock(async () => {});
 	const sleep = mock(async () => {});
-	const environment = {
-		ACTIONS_RESULTS_URL: "https://results.example/",
-		ACTIONS_RUNTIME_TOKEN: "runtime-token",
-	};
+	const environment = cacheServiceEnvironment;
 
 	expect(restoreCache(["cache"], "key", [], { environment, execute, fetch, sleep })).rejects.toThrow(
 		"cache read denied",

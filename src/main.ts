@@ -16,11 +16,12 @@ import {
 import { isCacheAvailable, restoreCache } from "#lib/cache";
 import { checkFormatting } from "#lib/check";
 import { computeCacheKey, findConfigFiles } from "#lib/config";
+import { ACTION_INPUT, ACTION_OUTPUT, ACTION_STATE, ACTION_VALUE, DPRINT, ENVIRONMENT } from "#lib/contracts";
 import { describeError } from "#lib/error";
 import { installDprint } from "#lib/install";
 import { warmupPlugins } from "#lib/warmup";
 
-const pluginCacheDir = (): string => env["DPRINT_CACHE_DIR"] ?? join(homedir(), ".cache", "dprint");
+const pluginCacheDir = (): string => env[ENVIRONMENT.dprintCacheDirectory] ?? join(homedir(), ".cache", DPRINT.name);
 
 const restorePluginCache = async (
 	cacheDir: string,
@@ -40,9 +41,9 @@ const restorePluginCache = async (
 	const { primaryKey, restoreKeys } = computeCacheKey(configPaths, version, platformKey);
 	debug(`Plugin cache primary key: ${primaryKey}`);
 	debug(`Plugin cache restore keys: ${restoreKeys.join(", ")}`);
-	saveState("PLUGIN_CACHE_KEY", primaryKey);
-	saveState("PLUGIN_CACHE_DIR", cacheDir);
-	setOutput("plugin-cache-key", primaryKey);
+	saveState(ACTION_STATE.pluginCacheKey, primaryKey);
+	saveState(ACTION_STATE.pluginCacheDirectory, cacheDir);
+	setOutput(ACTION_OUTPUT.pluginCacheKey, primaryKey);
 
 	let hitKey: string | undefined;
 	try {
@@ -53,38 +54,39 @@ const restorePluginCache = async (
 
 	const exactHit = hitKey === primaryKey;
 	debug(`Plugin cache restore result: ${hitKey ?? "miss"}; exact hit: ${exactHit}`);
-	setOutput("plugin-cache-hit", exactHit);
+	setOutput(ACTION_OUTPUT.pluginCacheHit, exactHit);
 	if (hitKey !== undefined) info(`Plugin cache restored from: ${hitKey}`);
 	else info("Plugin cache miss");
 	if (exactHit) {
-		saveState("PLUGIN_CACHE_EXACT_HIT", "true");
+		saveState(ACTION_STATE.pluginCacheExactHit, ACTION_VALUE.true);
 		return;
 	}
 
-	if (await warmupPlugins(binaryPath, configPaths)) saveState("PLUGIN_CACHE_READY", "true");
+	if (await warmupPlugins(binaryPath, configPaths)) saveState(ACTION_STATE.pluginCacheReady, ACTION_VALUE.true);
 };
 
 const run = async (): Promise<void> => {
 	try {
-		const versionInput = getInput("dprint-version") || "latest";
-		const token = getInput("token");
+		const versionInput = getInput(ACTION_INPUT.dprintVersion) || DPRINT.latestVersion;
+		const token = getInput(ACTION_INPUT.token);
 		if (token !== "") setSecret(token);
-		const configPathInput = getInput("config-path");
-		const additionalArgs = getInput("args", { trimWhitespace: false });
-		const cacheEnabled = getInput("cache") !== "false";
-		const checkEnabled = getInput("run-check") !== "false";
+		const configPathInput = getInput(ACTION_INPUT.configPath);
+		const additionalArgs = getInput(ACTION_INPUT.args, { trimWhitespace: false });
+		const cacheEnabled = getInput(ACTION_INPUT.cache) !== ACTION_VALUE.false;
+		const checkEnabled = getInput(ACTION_INPUT.runCheck) !== ACTION_VALUE.false;
 		const cacheDir = pluginCacheDir();
 		debug(
-			`Inputs: dprint-version=${versionInput}; token=${
+			`Inputs: ${ACTION_INPUT.dprintVersion}=${versionInput}; ${ACTION_INPUT.token}=${
 				token === "" ? "not provided" : "provided"
-			}; cache=${cacheEnabled}; run-check=${checkEnabled}; config-path=${configPathInput || "auto"}; args=${
-				additionalArgs === "" ? "none" : "provided"
-			}`,
+			}; ${ACTION_INPUT.cache}=${cacheEnabled}; ${ACTION_INPUT.runCheck}=${checkEnabled}; ${ACTION_INPUT.configPath}=$
+			{
+				configPathInput || "auto"
+			}; ${ACTION_INPUT.args}=${additionalArgs === "" ? "none" : "provided"}`,
 		);
 		debug(`Plugin cache directory: ${cacheDir}`);
-		exportVariable("DPRINT_CACHE_DIR", cacheDir);
-		setOutput("plugin-cache-hit", false);
-		setOutput("plugin-cache-key", "");
+		exportVariable(ENVIRONMENT.dprintCacheDirectory, cacheDir);
+		setOutput(ACTION_OUTPUT.pluginCacheHit, false);
+		setOutput(ACTION_OUTPUT.pluginCacheKey, "");
 
 		const { version, location, platformKey } = await installDprint(versionInput, cacheEnabled, token);
 		if (cacheEnabled && isCacheAvailable()) {

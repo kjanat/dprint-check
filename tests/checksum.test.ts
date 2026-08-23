@@ -4,7 +4,8 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { checksumFromManifest, resolveReleaseAssetChecksum, verifyReleaseAsset } from "#lib/checksum";
-import { releaseAsset, useTestContext } from "#test/helpers";
+import { DPRINT } from "#lib/contracts";
+import { releaseAsset, TEST_DPRINT_ASSET, TEST_DPRINT_VERSION, useTestContext } from "#test/helpers";
 
 const context = useTestContext();
 
@@ -18,7 +19,12 @@ describe("checksumFromManifest", () => {
 			assetName: "dprint-aarch64.zip",
 			expected: hash,
 		},
-		{ name: "different asset", manifest: `${hash}  dprint-x86_64.zip\n`, assetName: "dprint.zip", expected: undefined },
+		{
+			name: "different asset",
+			manifest: `${hash}  dprint-x86_64.zip\n`,
+			assetName: TEST_DPRINT_ASSET,
+			expected: undefined,
+		},
 	])("parses $name", ({ manifest, assetName, expected }) => {
 		expect(checksumFromManifest(manifest, assetName)).toBe(expected);
 	});
@@ -27,42 +33,42 @@ describe("checksumFromManifest", () => {
 describe("verifyReleaseAsset", () => {
 	test("uses the digest supplied by GitHub for current release assets", async () => {
 		const directory = await context.temporaryDirectory("dprint-checksum-");
-		const archive = join(directory, "dprint.zip");
+		const archive = join(directory, TEST_DPRINT_ASSET);
 		await writeFile(archive, "verified archive");
-		const digest = createHash("sha256").update("verified archive").digest("hex");
-		const asset = releaseAsset("dprint.zip", `sha256:${digest}`);
+		const digest = createHash(DPRINT.sha256Algorithm).update("verified archive").digest("hex");
+		const asset = releaseAsset(TEST_DPRINT_ASSET, `${DPRINT.sha256Algorithm}:${digest}`);
 		const download = mock(async () => {
 			throw new Error("checksum manifest should not be downloaded");
 		});
 
-		const expected = await resolveReleaseAssetChecksum("0.56.1", asset, [asset], download);
+		const expected = await resolveReleaseAssetChecksum(TEST_DPRINT_VERSION, asset, [asset], download);
 		expect(verifyReleaseAsset(archive, asset, expected)).resolves.toBeUndefined();
 		expect(download).not.toHaveBeenCalled();
 	});
 
 	test("rejects a mismatched GitHub digest", async () => {
 		const directory = await context.temporaryDirectory("dprint-checksum-");
-		const archive = join(directory, "dprint.zip");
+		const archive = join(directory, TEST_DPRINT_ASSET);
 		await writeFile(archive, "unverified archive");
 		const expectedChecksum = "0".repeat(64);
-		const actualChecksum = createHash("sha256").update("unverified archive").digest("hex");
-		const asset = releaseAsset("dprint.zip", `sha256:${expectedChecksum}`);
+		const actualChecksum = createHash(DPRINT.sha256Algorithm).update("unverified archive").digest("hex");
+		const asset = releaseAsset(TEST_DPRINT_ASSET, `${DPRINT.sha256Algorithm}:${expectedChecksum}`);
 
-		const expected = await resolveReleaseAssetChecksum("0.56.1", asset, [asset]);
+		const expected = await resolveReleaseAssetChecksum(TEST_DPRINT_VERSION, asset, [asset]);
 		expect(verifyReleaseAsset(archive, asset, expected)).rejects.toThrow(
-			`SHA-256 mismatch for dprint.zip: expected ${expectedChecksum}, got ${actualChecksum}`,
+			`SHA-256 mismatch for ${TEST_DPRINT_ASSET}: expected ${expectedChecksum}, got ${actualChecksum}`,
 		);
 	});
 
 	test("downloads the checksum manifest for older release assets", async () => {
 		const directory = await context.temporaryDirectory("dprint-checksum-");
-		const archive = join(directory, "dprint.zip");
-		const manifest = join(directory, "SHASUMS256.txt");
+		const archive = join(directory, TEST_DPRINT_ASSET);
+		const manifest = join(directory, DPRINT.checksumAsset);
 		await writeFile(archive, "older archive");
-		const digest = createHash("sha256").update("older archive").digest("hex");
-		await writeFile(manifest, `${digest}  dprint.zip\n`);
-		const asset = releaseAsset("dprint.zip");
-		const checksumAsset = releaseAsset("SHASUMS256.txt");
+		const digest = createHash(DPRINT.sha256Algorithm).update("older archive").digest("hex");
+		await writeFile(manifest, `${digest}  ${TEST_DPRINT_ASSET}\n`);
+		const asset = releaseAsset(TEST_DPRINT_ASSET);
+		const checksumAsset = releaseAsset(DPRINT.checksumAsset);
 		const download = mock(async () => manifest);
 
 		const expected = await resolveReleaseAssetChecksum(
@@ -77,7 +83,7 @@ describe("verifyReleaseAsset", () => {
 	});
 
 	test("rejects unverifiable historical releases before downloading anything", async () => {
-		const asset = releaseAsset("dprint.zip");
+		const asset = releaseAsset(TEST_DPRINT_ASSET);
 		const download = mock(async () => {
 			throw new Error("download should not run");
 		});
@@ -90,14 +96,14 @@ describe("verifyReleaseAsset", () => {
 
 	test("rejects a checksum manifest without the selected asset", async () => {
 		const directory = await context.temporaryDirectory("dprint-checksum-");
-		const manifest = join(directory, "SHASUMS256.txt");
+		const manifest = join(directory, DPRINT.checksumAsset);
 		await writeFile(manifest, `${"a".repeat(64)}  another-asset.zip\n`);
-		const asset = releaseAsset("dprint.zip");
-		const checksumAsset = releaseAsset("SHASUMS256.txt");
+		const asset = releaseAsset(TEST_DPRINT_ASSET);
+		const checksumAsset = releaseAsset(DPRINT.checksumAsset);
 		const download = mock(async () => manifest);
 
 		expect(resolveReleaseAssetChecksum("0.49.1", asset, [asset, checksumAsset], download)).rejects
-			.toThrow("SHASUMS256.txt has no checksum for dprint.zip");
+			.toThrow(`${DPRINT.checksumAsset} has no checksum for ${TEST_DPRINT_ASSET}`);
 		expect(download).toHaveBeenCalledTimes(1);
 		expect(download).toHaveBeenCalledWith(checksumAsset.browser_download_url);
 	});

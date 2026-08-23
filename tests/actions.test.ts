@@ -14,15 +14,16 @@ import {
 	setSecret,
 	warning,
 } from "#lib/actions";
-import { useTestContext } from "#test/helpers";
+import { ACTION_INPUT, ACTION_OUTPUT, ENVIRONMENT } from "#lib/contracts";
+import { TEST_DPRINT_BINARY, useTestContext } from "#test/helpers";
 
 const context = useTestContext();
 
 test("reads action inputs with the toolkit's whitespace behavior", () => {
 	context.setEnvironment("INPUT_CONFIG-PATH", "  configs/dprint.json  \n");
 
-	expect(getInput("config-path")).toBe("configs/dprint.json");
-	expect(getInput("config-path", { trimWhitespace: false })).toBe("  configs/dprint.json  \n");
+	expect(getInput(ACTION_INPUT.configPath)).toBe("configs/dprint.json");
+	expect(getInput(ACTION_INPUT.configPath, { trimWhitespace: false })).toBe("  configs/dprint.json  \n");
 	expect(getInput("missing")).toBe("");
 });
 
@@ -33,10 +34,10 @@ describe("GitHub file commands", () => {
 		const stateFile = join(directory, "state.txt");
 		await writeFile(outputFile, "");
 		await writeFile(stateFile, "");
-		context.setEnvironment("GITHUB_OUTPUT", outputFile);
-		context.setEnvironment("GITHUB_STATE", stateFile);
+		context.setEnvironment(ENVIRONMENT.githubOutputFile, outputFile);
+		context.setEnvironment(ENVIRONMENT.githubStateFile, stateFile);
 
-		setOutput("cache-hit", true);
+		setOutput(ACTION_OUTPUT.cacheHit, true);
 		setOutput("details", "first\nsecond");
 		saveState("cache-key", "dprint\nplugins");
 
@@ -54,20 +55,22 @@ describe("GitHub file commands", () => {
 		const pathFile = join(directory, "path.txt");
 		await writeFile(environmentFile, "");
 		await writeFile(pathFile, "");
-		context.setEnvironment("GITHUB_ENV", environmentFile);
-		context.setEnvironment("GITHUB_PATH", pathFile);
-		context.setEnvironment("DPRINT_CACHE_DIR", undefined);
+		context.setEnvironment(ENVIRONMENT.githubEnvironmentFile, environmentFile);
+		context.setEnvironment(ENVIRONMENT.githubPathFile, pathFile);
+		context.setEnvironment(ENVIRONMENT.dprintCacheDirectory, undefined);
 		context.setEnvironment("PATH", "/existing/path");
 
-		exportVariable("DPRINT_CACHE_DIR", "/cache/dprint");
-		addPath("/tools/dprint");
+		exportVariable(ENVIRONMENT.dprintCacheDirectory, "/cache/dprint");
+		addPath(TEST_DPRINT_BINARY);
 
-		expect(process.env["DPRINT_CACHE_DIR"]).toBe("/cache/dprint");
+		expect(process.env[ENVIRONMENT.dprintCacheDirectory]).toBe("/cache/dprint");
 		expect(await readFile(environmentFile, "utf8")).toMatch(
-			/^DPRINT_CACHE_DIR<<dprint_[^\n]+\n\/cache\/dprint\ndprint_[^\n]+\n$/,
+			new RegExp(
+				`^${ENVIRONMENT.dprintCacheDirectory}<<dprint_[^\\n]+\\n/cache/dprint\\ndprint_[^\\n]+\\n$`,
+			),
 		);
-		expect(process.env["PATH"]).toBe(`/tools/dprint${delimiter}/existing/path`);
-		expect(await readFile(pathFile, "utf8")).toBe("/tools/dprint\n");
+		expect(process.env["PATH"]).toBe(`${TEST_DPRINT_BINARY}${delimiter}/existing/path`);
+		expect(await readFile(pathFile, "utf8")).toBe(`${TEST_DPRINT_BINARY}\n`);
 	});
 });
 
@@ -77,11 +80,11 @@ test("reads action state", () => {
 });
 
 test("emits escaped workflow commands when file commands are unavailable", () => {
-	context.setEnvironment("GITHUB_OUTPUT", undefined);
-	context.setEnvironment("GITHUB_STATE", undefined);
-	context.setEnvironment("GITHUB_ENV", undefined);
-	context.setEnvironment("GITHUB_PATH", undefined);
-	context.setEnvironment("DPRINT_CACHE_DIR", undefined);
+	context.setEnvironment(ENVIRONMENT.githubOutputFile, undefined);
+	context.setEnvironment(ENVIRONMENT.githubStateFile, undefined);
+	context.setEnvironment(ENVIRONMENT.githubEnvironmentFile, undefined);
+	context.setEnvironment(ENVIRONMENT.githubPathFile, undefined);
+	context.setEnvironment(ENVIRONMENT.dprintCacheDirectory, undefined);
 	context.setEnvironment("PATH", "/existing/path");
 	const write = spyOn(process.stdout, "write").mockImplementation(() => true);
 	try {
@@ -91,7 +94,7 @@ test("emits escaped workflow commands when file commands are unavailable", () =>
 		warning("careful");
 		setOutput("result:,", "line one\nline two");
 		saveState("cache-key", "state");
-		exportVariable("DPRINT_CACHE_DIR", "/cache");
+		exportVariable(ENVIRONMENT.dprintCacheDirectory, "/cache");
 		addPath("/tools");
 
 		expect(write.mock.calls.map(([message]) => message)).toEqual([
@@ -101,7 +104,7 @@ test("emits escaped workflow commands when file commands are unavailable", () =>
 			"::warning::careful\n",
 			"::set-output name=result%3A%2C::line one%0Aline two\n",
 			"::save-state name=cache-key::state\n",
-			"::set-env name=DPRINT_CACHE_DIR::/cache\n",
+			`::set-env name=${ENVIRONMENT.dprintCacheDirectory}::/cache\n`,
 			"::add-path::/tools\n",
 		]);
 	} finally {

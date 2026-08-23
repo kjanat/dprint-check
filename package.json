@@ -20,9 +20,10 @@
 		"biome:check": "biome check",
 		"build": "tsdown",
 		"check": "run --sequential fmt:check biome:check typecheck test",
-		"fmt": "dprint fmt",
-		"fmt:check": "dprint check",
+		"fmt": "run -q dprint fmt",
+		"fmt:check": "run -q dprint check",
 		"test": "bun test",
+		"knip": "knip",
 		"typecheck": "tsc --noEmit"
 	},
 	"dependencies": {
@@ -32,6 +33,7 @@
 		"@biomejs/biome": "^2.5.10",
 		"@types/bun": "^1.4",
 		"@types/node": "^24",
+		"knip": "^6.32.2",
 		"runner-run": "^0.25.1",
 		"tsdown": ">=0.22",
 		"typescript": "^7"

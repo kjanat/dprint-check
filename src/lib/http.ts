@@ -1,6 +1,6 @@
-export const isRetryableStatus = (status: number): boolean => status === 408 || status === 429 || status >= 500;
+const isRetryableStatus = (status: number): boolean => status === 408 || status === 429 || status >= 500;
 
-export type Fetch = (input: string | URL, init?: RequestInit) => Promise<Response>;
+type Fetch = (input: string | URL, init?: RequestInit) => Promise<Response>;
 
 export interface RetryOptions {
 	attempts?: number;
@@ -8,6 +8,8 @@ export interface RetryOptions {
 	onRetry?: (attempt: number, attempts: number) => void;
 	sleep?: (milliseconds: number) => Promise<void>;
 }
+
+export type RetryTransportOptions = Pick<RetryOptions, "fetch" | "sleep">;
 
 const sleep = (milliseconds: number): Promise<void> => new Promise(resolve => setTimeout(resolve, milliseconds));
 

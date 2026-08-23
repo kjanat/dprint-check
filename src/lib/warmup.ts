@@ -1,11 +1,13 @@
 import { dirname } from "node:path";
 
 import { info, warning } from "#lib/actions";
+import { DPRINT } from "#lib/contracts";
 import { describeError } from "#lib/error";
 import { execFileAsync } from "#lib/exec";
 
-const ATTEMPTS = 3;
-const TIMEOUT_MS = 60_000;
+export const WARMUP_ATTEMPTS = 3;
+export const WARMUP_MAX_BUFFER = 64 * 1024 * 1024;
+export const WARMUP_TIMEOUT_MS = 60_000;
 type Execute = (file: string, args: string[], options: {
 	timeout: number;
 	cwd: string;
@@ -20,12 +22,12 @@ const isTimeoutKill = (error: unknown): boolean => {
 };
 
 const warmupConfig = async (binaryPath: string, configPath: string, execute: Execute): Promise<boolean> => {
-	for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
+	for (let attempt = 1; attempt <= WARMUP_ATTEMPTS; attempt++) {
 		try {
-			await execute(binaryPath, ["output-file-paths", "--config", configPath], {
-				timeout: TIMEOUT_MS,
+			await execute(binaryPath, [DPRINT.command.warmup, DPRINT.command.config, configPath], {
+				timeout: WARMUP_TIMEOUT_MS,
 				cwd: dirname(configPath),
-				maxBuffer: 64 * 1024 * 1024,
+				maxBuffer: WARMUP_MAX_BUFFER,
 			});
 			info(`Plugin warmup complete: ${configPath}`);
 			return true;
@@ -34,10 +36,10 @@ const warmupConfig = async (binaryPath: string, configPath: string, execute: Exe
 				warning(`Plugin warmup failed: ${describeError(error)}`);
 				return false;
 			}
-			info(`Plugin warmup hung (>${TIMEOUT_MS / 1000}s), attempt ${attempt}/${ATTEMPTS}`);
+			info(`Plugin warmup hung (>${WARMUP_TIMEOUT_MS / 1000}s), attempt ${attempt}/${WARMUP_ATTEMPTS}`);
 		}
 	}
-	throw new Error(`Plugin warmup kept hanging after ${ATTEMPTS} attempts`);
+	throw new Error(`Plugin warmup kept hanging after ${WARMUP_ATTEMPTS} attempts`);
 };
 
 export const warmupPlugins = async (

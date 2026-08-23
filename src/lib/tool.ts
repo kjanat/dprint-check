@@ -7,19 +7,22 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
 import { debug } from "#lib/actions";
+import { ENVIRONMENT, RUNTIME_OS } from "#lib/contracts";
 import { execFileAsync } from "#lib/exec";
 import { requestWithRetry } from "#lib/http";
-import type { RetryOptions } from "#lib/http";
+import type { RetryTransportOptions } from "#lib/http";
 import { createTemporaryDirectory } from "#lib/temp";
 
-type DownloadOptions = Pick<RetryOptions, "fetch" | "sleep">;
+type DownloadOptions = RetryTransportOptions;
 
-const temporaryRoot = (): string => env["RUNNER_TEMP"] ?? tmpdir();
+const POWERSHELL_ARGUMENTS = ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command"] as const;
+
+const temporaryRoot = (): string => env[ENVIRONMENT.runnerTemporaryDirectory] ?? tmpdir();
 
 const temporaryDirectory = (prefix: string): Promise<string> => createTemporaryDirectory(temporaryRoot(), prefix);
 
 const toolPath = (tool: string, version: string, architecture: string): string | undefined => {
-	const root = env["RUNNER_TOOL_CACHE"];
+	const root = env[ENVIRONMENT.runnerToolCache];
 	return root === undefined || root === "" ? undefined : join(root, tool, version, architecture);
 };
 
@@ -37,7 +40,7 @@ export const cacheToolDirectory = async (
 ): Promise<string> => {
 	const destination = toolPath(tool, version, architecture);
 	if (destination === undefined) {
-		debug("RUNNER_TOOL_CACHE is unavailable; skipping tool-cache storage");
+		debug(`${ENVIRONMENT.runnerToolCache} is unavailable; skipping tool-cache storage`);
 		return "";
 	}
 	await rm(destination, { recursive: true, force: true });
@@ -71,15 +74,15 @@ const powershellLiteral = (value: string): string => `'${value.replaceAll("'", "
 
 export const extractZip = async (archive: string): Promise<string> => {
 	const destination = await temporaryDirectory("dprint-extract-");
-	if (process.platform === "win32") {
-		const command = `Expand-Archive -LiteralPath ${powershellLiteral(archive)} -DestinationPath ${
-			powershellLiteral(destination)
-		} -Force`;
+	if (process.platform === RUNTIME_OS.windows) {
+		const a = powershellLiteral(archive);
+		const d = powershellLiteral(destination);
+		const command = `Expand-Archive -LiteralPath ${a} -DestinationPath ${d} -Force`;
 		try {
-			await execFileAsync("pwsh", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command]);
+			await execFileAsync("pwsh", [...POWERSHELL_ARGUMENTS, command]);
 		} catch (error) {
 			if (!(error instanceof Error) || !("code" in error) || error.code !== "ENOENT") throw error;
-			await execFileAsync("powershell", ["-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command]);
+			await execFileAsync("powershell", [...POWERSHELL_ARGUMENTS, command]);
 		}
 	} else {
 		await execFileAsync("unzip", ["-o", "-q", archive, "-d", destination]);

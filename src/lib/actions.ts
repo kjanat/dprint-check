@@ -4,6 +4,8 @@ import { EOL } from "node:os";
 import { delimiter } from "node:path";
 import { env } from "node:process";
 
+import { ENVIRONMENT } from "#lib/contracts";
+
 interface InputOptions {
 	trimWhitespace?: boolean;
 }
@@ -49,23 +51,23 @@ export const setFailed = (message: string): void => {
 
 export const setOutput = (name: string, value: string | boolean): void => {
 	const serialized = String(value);
-	if (!fileCommand("GITHUB_OUTPUT", name, serialized)) command("set-output", serialized, { name });
+	if (!fileCommand(ENVIRONMENT.githubOutputFile, name, serialized)) command("set-output", serialized, { name });
 };
 
 export const saveState = (name: string, value: string): void => {
-	if (!fileCommand("GITHUB_STATE", name, value)) command("save-state", value, { name });
+	if (!fileCommand(ENVIRONMENT.githubStateFile, name, value)) command("save-state", value, { name });
 };
 
 export const getState = (name: string): string => env[`STATE_${name}`] ?? "";
 
 export const exportVariable = (name: string, value: string): void => {
 	env[name] = value;
-	if (!fileCommand("GITHUB_ENV", name, value)) command("set-env", value, { name });
+	if (!fileCommand(ENVIRONMENT.githubEnvironmentFile, name, value)) command("set-env", value, { name });
 };
 
 export const addPath = (path: string): void => {
 	env["PATH"] = `${path}${delimiter}${env["PATH"] ?? ""}`;
-	const file = env["GITHUB_PATH"];
+	const file = env[ENVIRONMENT.githubPathFile];
 	if (file !== undefined && file !== "") appendFileSync(file, `${path}${EOL}`, { encoding: "utf8" });
 	else command("add-path", path);
 };

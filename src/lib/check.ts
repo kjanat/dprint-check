@@ -1,3 +1,4 @@
+import { DPRINT } from "#lib/contracts";
 import { execFileAsync } from "#lib/exec";
 
 type Execute = (commandLine: string, args: string[]) => Promise<unknown>;
@@ -49,8 +50,8 @@ export const parseArgs = (input: string): string[] => {
 };
 
 export const buildCheckArgs = (configPath: string, additionalArgs: string): string[] => {
-	const args = ["check"];
-	if (configPath !== "") args.push("--config", configPath);
+	const args: string[] = [DPRINT.command.check];
+	if (configPath !== "") args.push(DPRINT.command.config, configPath);
 	if (additionalArgs.trim() !== "") args.push(...parseArgs(additionalArgs));
 	return args;
 };

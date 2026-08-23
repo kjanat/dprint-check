@@ -3,6 +3,7 @@ import { readdir } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 
 import action from "#action.yml" with { type: "yaml" };
+import { ACTION_INPUT, ACTION_OUTPUT, ACTION_VALUE, DPRINT } from "#lib/contracts";
 
 const root = dirname(import.meta.dir);
 
@@ -21,37 +22,24 @@ describe("action metadata", () => {
 	});
 
 	test("declares exactly the supported inputs", () => {
-		expect(action.inputs).toContainAllKeys([
-			"dprint-version",
-			"token",
-			"cache",
-			"run-check",
-			"config-path",
-			"args",
-		]);
+		expect(action.inputs).toContainAllKeys(Object.values(ACTION_INPUT));
 	});
 
 	test.each(
 		[
-			["dprint-version", "latest"],
-			["token", "${{ github.token }}"],
-			["cache", "true"],
-			["run-check", "true"],
-			["config-path", ""],
-			["args", ""],
+			[ACTION_INPUT.dprintVersion, DPRINT.latestVersion],
+			[ACTION_INPUT.token, "${{ github.token }}"],
+			[ACTION_INPUT.cache, ACTION_VALUE.true],
+			[ACTION_INPUT.runCheck, ACTION_VALUE.true],
+			[ACTION_INPUT.configPath, ""],
+			[ACTION_INPUT.args, ""],
 		] as const,
 	)("defaults %s to %s", (input, expected) => {
 		expect(action.inputs[input].default).toBe(expected);
 	});
 
 	test("declares cache and installation outputs", () => {
-		expect(action.outputs).toContainAllKeys([
-			"cache-hit",
-			"location",
-			"plugin-cache-hit",
-			"plugin-cache-key",
-			"version",
-		]);
+		expect(action.outputs).toContainAllKeys(Object.values(ACTION_OUTPUT));
 	});
 });
 

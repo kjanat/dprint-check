@@ -1,7 +1,7 @@
 import type { OutgoingHttpHeaders } from "node:http";
 
-const USER_AGENT = "dprint-check-action";
-const REPOSITORY = "dprint/dprint";
+import { DPRINT } from "#lib/contracts";
+import { GITHUB_API, githubApiHeaders } from "#lib/github";
 
 export interface ReleaseAsset {
 	name: string;
@@ -31,7 +31,7 @@ const jsonClient: JsonClient = {
 
 export const specifiedVersion = (input: string): string | undefined => {
 	const requested = input.trim();
-	return requested === "" || requested.toLowerCase() === "latest" ? undefined : requested;
+	return requested === "" || requested.toLowerCase() === DPRINT.latestVersion ? undefined : requested;
 };
 
 const isRelease = (value: unknown): value is Release => {
@@ -56,22 +56,18 @@ export const resolveRelease = async (
 ): Promise<Release> => {
 	const requested = specifiedVersion(input);
 	const endpoint = requested === undefined
-		? `https://api.github.com/repos/${REPOSITORY}/releases/latest`
-		: `https://api.github.com/repos/${REPOSITORY}/releases/tags/${encodeURIComponent(requested)}`;
-	const headers: OutgoingHttpHeaders = {
-		accept: "application/vnd.github+json",
-		"user-agent": USER_AGENT,
-		"x-github-api-version": "2026-03-10",
-	};
-	if (token !== "") headers.authorization = `Bearer ${token}`;
-	const response = await http.getJson<unknown>(endpoint, headers);
+		? `${GITHUB_API.dprintReleasesUrl}/${DPRINT.latestVersion}`
+		: `${GITHUB_API.dprintReleasesUrl}/tags/${encodeURIComponent(requested)}`;
+	const response = await http.getJson<unknown>(endpoint, githubApiHeaders(token));
 	if (response.statusCode === 404) {
 		throw new Error(
 			requested === undefined ? "The latest dprint release was not found" : `dprint release ${requested} was not found`,
 		);
 	}
 	if (response.statusCode !== 200 || !isRelease(response.result)) {
-		throw new Error(`Failed to resolve dprint release ${requested ?? "latest"} (HTTP ${response.statusCode})`);
+		throw new Error(
+			`Failed to resolve dprint release ${requested ?? DPRINT.latestVersion} (HTTP ${response.statusCode})`,
+		);
 	}
 	return response.result;
 };

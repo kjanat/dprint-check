@@ -8,26 +8,55 @@ import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
 import { debug, setSecret } from "#lib/actions";
+import { DPRINT, ENVIRONMENT, RUNTIME_OS } from "#lib/contracts";
 import { execFileAsync } from "#lib/exec";
+import { GITHUB_API } from "#lib/github";
 import { requestWithRetry } from "#lib/http";
-import type { RetryOptions } from "#lib/http";
+import type { RetryTransportOptions } from "#lib/http";
 import { createTemporaryDirectory } from "#lib/temp";
 
 const SERVICE = "github.actions.results.api.v1.CacheService";
+export const AZURE_STORAGE_API_VERSION = "2021-12-02";
+const JSON_MEDIA_TYPE = "application/json";
 const VERSION_SALT = "1.0";
 const UPLOAD_CHUNK_SIZE = 32 * 1024 * 1024;
+const HTTP_HEADER = {
+	contentLength: "content-length",
+	contentType: "content-type",
+	storageVersion: "x-ms-version",
+} as const;
+
+export const CACHE_SERVICE_METHOD = {
+	create: "CreateCacheEntry",
+	finalize: "FinalizeCacheEntryUpload",
+	restore: "GetCacheEntryDownloadURL",
+} as const;
 
 type Environment = Record<string, string | undefined>;
 type Execute = (file: string, args: string[], options?: { cwd?: string }) => Promise<unknown>;
 
-interface CacheOptions extends Pick<RetryOptions, "fetch" | "sleep"> {
+interface CacheOptions extends RetryTransportOptions {
 	debug?: (message: string) => void;
 	environment?: Environment;
 	execute?: Execute;
 	maskSecret?: (secret: string) => void;
 }
 
-type Compression = "gzip" | "zstd-without-long";
+export const CACHE_COMPRESSION = {
+	gzip: "gzip",
+	zstd: "zstd-without-long",
+} as const;
+
+export const CACHE_MODE = {
+	none: "none",
+	read: "read",
+	write: "write",
+	writeOnly: "write-only",
+} as const;
+
+const CACHE_MODES: readonly string[] = Object.values(CACHE_MODE);
+
+type Compression = typeof CACHE_COMPRESSION[keyof typeof CACHE_COMPRESSION];
 
 interface DownloadResponse {
 	ok: boolean;
@@ -51,19 +80,18 @@ interface FinalizeResponse {
 
 const environment = (options: CacheOptions): Environment => options.environment ?? processEnv;
 
-const cacheModeAllows = (mode: string | undefined, operation: "read" | "write"): boolean => {
+const cacheModeAllows = (mode: string | undefined, operation: typeof CACHE_MODE.read | typeof CACHE_MODE.write): boolean => {
 	const normalized = mode?.trim().toLowerCase();
-	if (normalized === undefined || !["none", "read", "write", "write-only"].includes(normalized)) return true;
-	return operation === "read"
-		? normalized === "read" || normalized === "write"
-		: normalized === "write" || normalized === "write-only";
+	if (normalized === undefined || !CACHE_MODES.includes(normalized)) return true;
+	if (operation === CACHE_MODE.read) return normalized === CACHE_MODE.read || normalized === CACHE_MODE.write;
+	return normalized === CACHE_MODE.write || normalized === CACHE_MODE.writeOnly;
 };
 
 export const isCacheAvailable = (environment: Environment = processEnv): boolean => {
-	const server = new URL(environment["GITHUB_SERVER_URL"] ?? "https://github.com").hostname.toUpperCase();
+	const server = new URL(environment[ENVIRONMENT.githubServerUrl] ?? GITHUB_API.webUrl).hostname.toUpperCase();
 	const githubHosted = server === "GITHUB.COM" || server.endsWith(".GHE.COM") || server.endsWith(".LOCALHOST");
-	return githubHosted && environment["ACTIONS_RESULTS_URL"] !== undefined
-		&& environment["ACTIONS_RUNTIME_TOKEN"] !== undefined;
+	return githubHosted && environment[ENVIRONMENT.actionsResultsUrl] !== undefined
+		&& environment[ENVIRONMENT.actionsRuntimeToken] !== undefined;
 };
 
 const validateKeys = (primaryKey: string, restoreKeys: readonly string[] = []): void => {
@@ -76,19 +104,19 @@ const validateKeys = (primaryKey: string, restoreKeys: readonly string[] = []): 
 };
 
 const compression = async (execute: Execute): Promise<Compression> => {
-	if (process.platform === "win32") return "gzip";
+	if (process.platform === RUNTIME_OS.windows) return CACHE_COMPRESSION.gzip;
 	try {
 		await execute("zstd", ["--quiet", "--version"]);
-		return "zstd-without-long";
+		return CACHE_COMPRESSION.zstd;
 	} catch {
-		return "gzip";
+		return CACHE_COMPRESSION.gzip;
 	}
 };
 
 export const cacheVersion = (paths: readonly string[], method: Compression): string =>
-	createHash("sha256").update([...paths, method, VERSION_SALT].join("|")).digest("hex");
+	createHash(DPRINT.sha256Algorithm).update([...paths, method, VERSION_SALT].join("|")).digest("hex");
 
-const workspace = (environment: Environment): string => environment["GITHUB_WORKSPACE"] ?? process.cwd();
+const workspace = (environment: Environment): string => environment[ENVIRONMENT.githubWorkspace] ?? process.cwd();
 
 const relativePaths = (paths: readonly string[], environment: Environment): string[] => {
 	const root = workspace(environment);
@@ -100,12 +128,12 @@ const relativePaths = (paths: readonly string[], environment: Environment): stri
 };
 
 const tempDirectory = (environment: Environment): Promise<string> =>
-	createTemporaryDirectory(environment["RUNNER_TEMP"] ?? tmpdir(), "dprint-cache-");
+	createTemporaryDirectory(environment[ENVIRONMENT.runnerTemporaryDirectory] ?? tmpdir(), "dprint-cache-");
 
-const archiveName = (method: Compression): string => method === "gzip" ? "cache.tgz" : "cache.tzst";
+const archiveName = (method: Compression): string => method === CACHE_COMPRESSION.gzip ? "cache.tgz" : "cache.tzst";
 
 const tarCompression = (method: Compression, extract: boolean): string[] => {
-	if (method === "gzip") return [extract ? "-xzf" : "-czf"];
+	if (method === CACHE_COMPRESSION.gzip) return [extract ? "-xzf" : "-czf"];
 	return [extract ? "-xf" : "-cf", "--use-compress-program", extract ? "unzstd" : "zstdmt"];
 };
 
@@ -160,16 +188,16 @@ const request = (
 
 const twirp = async <T>(method: string, body: object, options: CacheOptions): Promise<T> => {
 	const runtime = environment(options);
-	const baseUrl = runtime["ACTIONS_RESULTS_URL"];
-	const token = runtime["ACTIONS_RUNTIME_TOKEN"];
+	const baseUrl = runtime[ENVIRONMENT.actionsResultsUrl];
+	const token = runtime[ENVIRONMENT.actionsRuntimeToken];
 	if (baseUrl === undefined || token === undefined) throw new Error("GitHub Actions cache service is unavailable");
 	const url = new URL(`/twirp/${SERVICE}/${method}`, baseUrl);
 	const response = await request(url, {
 		method: "POST",
 		headers: {
-			accept: "application/json",
+			accept: JSON_MEDIA_TYPE,
 			authorization: `Bearer ${token}`,
-			"content-type": "application/json",
+			[HTTP_HEADER.contentType]: JSON_MEDIA_TYPE,
 		},
 		body: JSON.stringify(body),
 	}, options);
@@ -192,9 +220,9 @@ const uploadBlock = async (url: URL, blockId: string, body: Uint8Array, options:
 	const response = await request(blockUrl, {
 		method: "PUT",
 		headers: {
-			"content-length": String(body.byteLength),
-			"content-type": "application/octet-stream",
-			"x-ms-version": url.searchParams.get("sv") ?? "2021-12-02",
+			[HTTP_HEADER.contentLength]: String(body.byteLength),
+			[HTTP_HEADER.contentType]: "application/octet-stream",
+			[HTTP_HEADER.storageVersion]: url.searchParams.get("sv") ?? AZURE_STORAGE_API_VERSION,
 		},
 		body,
 	}, options);
@@ -228,9 +256,9 @@ const upload = async (urlString: string, archive: string, options: CacheOptions)
 	const response = await request(blockListUrl, {
 		method: "PUT",
 		headers: {
-			"content-length": String(Buffer.byteLength(body)),
-			"content-type": "application/xml",
-			"x-ms-version": url.searchParams.get("sv") ?? "2021-12-02",
+			[HTTP_HEADER.contentLength]: String(Buffer.byteLength(body)),
+			[HTTP_HEADER.contentType]: "application/xml",
+			[HTTP_HEADER.storageVersion]: url.searchParams.get("sv") ?? AZURE_STORAGE_API_VERSION,
 		},
 		body,
 	}, options);
@@ -244,10 +272,10 @@ export const restoreCache = async (
 	options: CacheOptions = {},
 ): Promise<string | undefined> => {
 	validateKeys(primaryKey, restoreKeys);
-	if (!cacheModeAllows(environment(options)["ACTIONS_CACHE_MODE"], "read")) return undefined;
+	if (!cacheModeAllows(environment(options)[ENVIRONMENT.actionsCacheMode], CACHE_MODE.read)) return undefined;
 	const execute = options.execute ?? execFileAsync;
 	const method = await compression(execute);
-	const response = await twirp<DownloadResponse>("GetCacheEntryDownloadURL", {
+	const response = await twirp<DownloadResponse>(CACHE_SERVICE_METHOD.restore, {
 		key: primaryKey,
 		restore_keys: restoreKeys,
 		version: cacheVersion(paths, method),
@@ -273,7 +301,7 @@ export const restoreCache = async (
 
 export const saveCache = async (paths: readonly string[], key: string, options: CacheOptions = {}): Promise<void> => {
 	validateKeys(key);
-	if (!cacheModeAllows(environment(options)["ACTIONS_CACHE_MODE"], "write")) return;
+	if (!cacheModeAllows(environment(options)[ENVIRONMENT.actionsCacheMode], CACHE_MODE.write)) return;
 	const execute = options.execute ?? execFileAsync;
 	const method = await compression(execute);
 	const version = cacheVersion(paths, method);
@@ -281,11 +309,11 @@ export const saveCache = async (paths: readonly string[], key: string, options: 
 	try {
 		const archive = await createArchive(paths, method, directory, options);
 		const size = (await stat(archive)).size;
-		const created = await twirp<CreateResponse>("CreateCacheEntry", { key, version }, options);
+		const created = await twirp<CreateResponse>(CACHE_SERVICE_METHOD.create, { key, version }, options);
 		const signedUrl = created.signed_upload_url ?? created.signedUploadUrl;
 		if (!created.ok || signedUrl === undefined) throw new Error(created.message ?? "Cache reservation failed");
 		await upload(signedUrl, archive, options);
-		const finalized = await twirp<FinalizeResponse>("FinalizeCacheEntryUpload", {
+		const finalized = await twirp<FinalizeResponse>(CACHE_SERVICE_METHOD.finalize, {
 			key,
 			size_bytes: String(size),
 			version,

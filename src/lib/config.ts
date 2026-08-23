@@ -4,9 +4,11 @@ import { glob } from "node:fs/promises";
 import { isAbsolute, join, relative, sep } from "node:path";
 import { cwd, env } from "node:process";
 
-export const CONFIG_NAMES = ["dprint.json", "dprint.jsonc", ".dprint.json", ".dprint.jsonc"] as const;
+import { DPRINT, ENVIRONMENT } from "#lib/contracts";
 
-const workspacePath = () => env["GITHUB_WORKSPACE"] ?? cwd();
+const CONFIG_NAMES = ["dprint.json", "dprint.jsonc", ".dprint.json", ".dprint.jsonc"] as const;
+
+const workspacePath = () => env[ENVIRONMENT.githubWorkspace] ?? cwd();
 
 export const findConfigFiles = async (customPath?: string): Promise<string[]> => {
 	const workspace = workspacePath();
@@ -35,7 +37,7 @@ export const computeCacheKey = (
 	platformKey: string,
 ): { primaryKey: string; restoreKeys: string[] } => {
 	const workspace = workspacePath();
-	const hash = createHash("sha256");
+	const hash = createHash(DPRINT.sha256Algorithm);
 	for (const configPath of [...configPaths].sort()) {
 		const stablePath = relative(workspace, configPath).split(sep).join("/");
 		hash.update(stablePath);
@@ -44,7 +46,7 @@ export const computeCacheKey = (
 		hash.update("\0");
 	}
 	const digest = hash.digest("hex");
-	const platformPrefix = `dprint-plugins-v2-${platformKey}`;
+	const platformPrefix = `${DPRINT.name}-plugins-v${DPRINT.pluginCacheVersion}-${platformKey}`;
 	const prefix = `${platformPrefix}-${dprintVersion}`;
 
 	return {

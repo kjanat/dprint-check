@@ -1,5 +1,6 @@
 import { debug, getState, info, warning } from "#lib/actions";
 import { isCacheAvailable, saveCache } from "#lib/cache";
+import { ACTION_STATE, ACTION_VALUE } from "#lib/contracts";
 import { describeError } from "#lib/error";
 
 const save = async (paths: string[], key: string, label: string): Promise<void> => {
@@ -21,23 +22,23 @@ const post = async (): Promise<void> => {
 	}
 
 	try {
-		const binaryKey = getState("BIN_CACHE_KEY");
-		const binaryDir = getState("BIN_CACHE_DIR");
+		const binaryKey = getState(ACTION_STATE.binaryCacheKey);
+		const binaryDir = getState(ACTION_STATE.binaryCacheDirectory);
 		debug(`Post binary cache state: key=${binaryKey || "none"}; directory=${binaryDir || "none"}`);
 		if (binaryKey !== "" && binaryDir !== "") await save([binaryDir], binaryKey, "dprint binary cache");
 
-		const pluginKey = getState("PLUGIN_CACHE_KEY");
-		const pluginDir = getState("PLUGIN_CACHE_DIR");
+		const pluginKey = getState(ACTION_STATE.pluginCacheKey);
+		const pluginDir = getState(ACTION_STATE.pluginCacheDirectory);
 		debug(`Post plugin cache state: key=${pluginKey || "none"}; directory=${pluginDir || "none"}`);
 		if (pluginKey === "" || pluginDir === "") {
 			info("No plugin cache to save");
 			return;
 		}
-		if (getState("PLUGIN_CACHE_EXACT_HIT") === "true") {
+		if (getState(ACTION_STATE.pluginCacheExactHit) === ACTION_VALUE.true) {
 			info("Plugin cache already up to date");
 			return;
 		}
-		if (getState("PLUGIN_CACHE_READY") !== "true") {
+		if (getState(ACTION_STATE.pluginCacheReady) !== ACTION_VALUE.true) {
 			info("Plugin cache warmup did not complete; skipping cache save");
 			return;
 		}

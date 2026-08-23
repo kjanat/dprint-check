@@ -1,9 +1,10 @@
 import { family, GLIBC, MUSL } from "detect-libc";
 import { arch, endianness, platform } from "node:os";
 
+import { RUNTIME_OS } from "#lib/contracts";
 import type { ReleaseAsset } from "#lib/version";
 
-export type Libc = "gnu" | "musl";
+type Libc = "gnu" | "musl";
 
 export interface RuntimePlatform {
 	os: string;
@@ -31,10 +32,10 @@ const architectureNames = (cpu: string, byteOrder: "BE" | "LE"): string[] => {
 };
 
 const platformNames = (os: string, libc?: Libc): string[] => {
-	if (os === "win32") return ["pc-windows-msvc"];
-	if (os === "darwin") return ["apple-darwin"];
-	if (os === "android") return ["linux-android"];
-	if (os === "linux" && libc !== undefined) return [`unknown-linux-${libc}`];
+	if (os === RUNTIME_OS.windows) return ["pc-windows-msvc"];
+	if (os === RUNTIME_OS.macos) return ["apple-darwin"];
+	if (os === RUNTIME_OS.android) return ["linux-android"];
+	if (os === RUNTIME_OS.linux && libc !== undefined) return [`unknown-linux-${libc}`];
 	return [];
 };
 
@@ -43,7 +44,7 @@ export const resolveRuntimePlatform = async (options: RuntimePlatformOptions = {
 	const cpu = options.cpu ?? arch();
 	const byteOrder = options.byteOrder ?? endianness();
 	let libc = options.libc;
-	if (os === "linux" && libc === undefined) {
+	if (os === RUNTIME_OS.linux && libc === undefined) {
 		const detected = await (options.detectLibc ?? family)();
 		if (detected === GLIBC) libc = "gnu";
 		else if (detected === MUSL) libc = "musl";

@@ -1,6 +1,8 @@
 import { describe, expect, mock, test } from "bun:test";
 
 import { buildCheckArgs, checkFormatting, parseArgs } from "#lib/check";
+import { DPRINT } from "#lib/contracts";
+import { TEST_DPRINT_BINARY } from "#test/helpers";
 
 describe("buildCheckArgs", () => {
 	test.each([
@@ -8,13 +10,13 @@ describe("buildCheckArgs", () => {
 			name: "uses auto-discovered config by default",
 			configPath: "",
 			additionalArgs: "",
-			expected: ["check"],
+			expected: [DPRINT.command.check],
 		},
 		{
 			name: "passes a config path as one argument",
 			configPath: "config files/dprint.json",
 			additionalArgs: "",
-			expected: ["check", "--config", "config files/dprint.json"],
+			expected: [DPRINT.command.check, DPRINT.command.config, "config files/dprint.json"],
 		},
 		{
 			name: "parses quoted arguments without invoking a shell",
@@ -55,10 +57,10 @@ describe("parseArgs", () => {
 test("runs dprint check with the constructed argv", async () => {
 	const execute = mock(async () => 0);
 
-	await checkFormatting("/tools/dprint", "config files/dprint.json", "--allow-no-files", execute);
+	await checkFormatting(TEST_DPRINT_BINARY, "config files/dprint.json", "--allow-no-files", execute);
 	expect(execute).toHaveBeenCalledTimes(1);
 	expect(execute).toHaveBeenCalledWith(
-		"/tools/dprint",
-		["check", "--config", "config files/dprint.json", "--allow-no-files"],
+		TEST_DPRINT_BINARY,
+		[DPRINT.command.check, DPRINT.command.config, "config files/dprint.json", "--allow-no-files"],
 	);
 });
