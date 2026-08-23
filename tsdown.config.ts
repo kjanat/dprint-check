@@ -5,24 +5,36 @@ import { defineConfig, type TsdownHooks } from "tsdown";
 
 import action from "./action.yml" with { type: "yaml" };
 
-const actionEntrypoints = [action.runs.main, action.runs.post];
+const actionEntrypoints = [action.runs.main, action.runs.post].toSorted();
+const sourceEntrypoints = [...new Bun.Glob("./src/*.ts").scanSync()].toSorted();
+const emittedBundlePaths = new Set<string>();
+let completedBuilds = 0;
 
 const writeReleaseChecksum: TsdownHooks["build:done"] = async ({ chunks }) => {
-	const bundlePaths = chunks
-		.map(chunk => relative(process.cwd(), resolve(chunk.outDir, chunk.fileName)).replaceAll("\\", "/"))
-		.toSorted();
-	for (const entrypoint of actionEntrypoints) {
-		if (!bundlePaths.includes(entrypoint)) throw new Error(`Missing Action entrypoint: ${entrypoint}`);
+	for (const chunk of chunks) {
+		emittedBundlePaths.add(relative(process.cwd(), resolve(chunk.outDir, chunk.fileName)).replaceAll("\\", "/"));
 	}
-	const lines = await Promise.all(bundlePaths.map(async path => {
+	completedBuilds++;
+	if (completedBuilds < sourceEntrypoints.length) return;
+
+	const bundlePaths = [...emittedBundlePaths].toSorted();
+	if (
+		bundlePaths.length !== actionEntrypoints.length
+		|| bundlePaths.some((path, index) => path !== actionEntrypoints[index])
+	) {
+		throw new Error(
+			`Expected only Action entrypoints: ${actionEntrypoints.join(", ")}; emitted: ${bundlePaths.join(", ")}`,
+		);
+	}
+	const lines = await Promise.all(actionEntrypoints.map(async path => {
 		const hash = createHash("sha256").update(await readFile(path)).digest("hex");
 		return `${hash}  ${path}`;
 	}));
 	await writeFile("SHA256SUMS", `${lines.join("\n")}\n`);
 };
 
-export default defineConfig({
-	entry: ["./src/*.ts"],
+const configs = sourceEntrypoints.map(entry => ({
+	entry,
 	minify: "dce-only",
 	clean: true,
 	target: "node24",
@@ -37,4 +49,6 @@ export default defineConfig({
 		onlyImport: [],
 	},
 	hooks: { "build:done": writeReleaseChecksum },
-});
+})) satisfies import("tsdown").UserConfig[];
+
+export default defineConfig(configs);

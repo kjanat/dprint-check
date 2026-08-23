@@ -48,7 +48,7 @@ describe("action metadata", () => {
 test("checksum manifest covers the bundle and configured entrypoints", async () => {
 	const files = await readdir(join(root, "dist"), { withFileTypes: true });
 	const bundlePaths = files.filter(file => file.isFile()).map(file => `dist/${file.name}`).toSorted();
-	expect(bundlePaths).toEqual(expect.arrayContaining([action.runs.main, action.runs.post]));
+	expect(bundlePaths).toEqual([action.runs.main, action.runs.post].toSorted());
 	const checksums = (await readFile(join(root, "SHA256SUMS"), "utf8"))
 		.trim()
 		.split(/\r?\n/);

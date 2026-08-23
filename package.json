@@ -1,6 +1,6 @@
 {
 	"name": "dprint-check-action",
-	"version": "3.0.5",
+	"version": "3.0.6",
 	"private": true,
 	"description": "GitHub Action to install dprint with caching and check formatting",
 	"type": "module",
@@ -26,6 +26,9 @@
 		"test": "bun test",
 		"knip": "knip",
 		"typecheck": "tsc --noEmit"
+	},
+	"knip": {
+		"entry": ["src/*.ts"]
 	},
 	"dependencies": {
 		"detect-libc": "^2.1.2"
