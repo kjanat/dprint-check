@@ -10,6 +10,7 @@ const root = dirname(import.meta.dir);
 expectTypeOf(action).not.toBeAny();
 expectTypeOf(action.runs.using).toEqualTypeOf<"node24">();
 expectTypeOf(action.inputs.token.default).toEqualTypeOf<"${{ github.token }}">();
+expectTypeOf(action.inputs.annotations.default).toEqualTypeOf<"true">();
 
 describe("action metadata", () => {
 	test("uses Node.js 24 with an always-running post step", () => {

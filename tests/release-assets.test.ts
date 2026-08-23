@@ -60,6 +60,6 @@ test("selects every historical dprint release ZIP", async () => {
 		}
 	}
 
-	expect(checked).toBeGreaterThan(0);
+	expect(checked).toBePositive();
 	expect(failures).toBeEmpty();
 });

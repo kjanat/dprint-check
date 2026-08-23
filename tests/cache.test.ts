@@ -129,9 +129,11 @@ test("saves and restores an exact directory through the v2 protocol", async () =
 		restore_keys: ["plugin-cache-"],
 	});
 	expect(serviceRequests[2]?.body.version).toBe(serviceRequests[0]?.body.version);
-	expect(Number(serviceRequests[1]?.body.size_bytes)).toBeGreaterThan(0);
-	expect(blocks.size).toBeGreaterThan(0);
+	expect(Number(serviceRequests[1]?.body.size_bytes)).toBePositive();
+	expect(blocks.size).toBePositive();
 	expect(options.maskSecret).toHaveBeenCalledTimes(2);
+	expect(options.maskSecret).toHaveBeenNthCalledWith(1, BLOB_URL);
+	expect(options.maskSecret).toHaveBeenNthCalledWith(2, BLOB_URL);
 });
 
 test("honors cache-mode before executing or requesting anything", async () => {
@@ -163,6 +165,7 @@ test.each([408, 429, 503])("retries transient HTTP %i cache-service failures", s
 	expect(fetch).toHaveBeenCalledTimes(2);
 	expect(sleep).toHaveBeenCalledTimes(1);
 	expect(debug).toHaveBeenCalledTimes(1);
+	expect(debug).toHaveBeenCalledWith("Cache request attempt 1/3 failed; retrying");
 });
 
 test("does not retry cache-service authorization failures", () => {

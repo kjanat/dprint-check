@@ -20,7 +20,7 @@ test("stores and finds complete tool-cache entries", async () => {
 	await writeFile(join(source, "nested", "metadata"), "metadata");
 	context.setEnvironment(ENVIRONMENT.runnerToolCache, toolCache);
 
-	expect(findTool(DPRINT.name, TEST_DPRINT_VERSION, "x64")).toBe("");
+	expect(findTool(DPRINT.name, TEST_DPRINT_VERSION, "x64")).toBeEmpty();
 	const cached = await cacheToolDirectory(source, DPRINT.name, TEST_DPRINT_VERSION, "x64");
 
 	expect(cached).toBe(join(toolCache, DPRINT.name, TEST_DPRINT_VERSION, "x64"));

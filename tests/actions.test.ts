@@ -25,7 +25,7 @@ test("reads action inputs with the toolkit's whitespace behavior", () => {
 
 	expect(getInput(ACTION_INPUT.configPath)).toBe("configs/dprint.json");
 	expect(getInput(ACTION_INPUT.configPath, { trimWhitespace: false })).toBe("  configs/dprint.json  \n");
-	expect(getInput("missing")).toBe("");
+	expect(getInput("missing")).toBeEmpty();
 });
 
 describe("GitHub file commands", () => {
