@@ -15,10 +15,13 @@ jobs:
         with: { node-version: "${{ env.NODE_VERSION }}" }
       # setup-bun already detects packageManager from package.json
       - uses: oven-sh/setup-bun@v2
-      - run: bun install --frozen-lockfile
-      - run: bun run build
+      - uses: kjanat/runner@master
+      - run: runner i -f build
       - uses: kjanat/actionlint@v1
-      - run: bun run check
+      - run: run -pk biome:check typecheck test
+      - name: dprint check (action)
+        uses: ./
+        with: { dprint-version: "${{ env.DPRINT_VERSION }}", config-path: dprint.json, cache: false }
       - name: Upload built action
         uses: actions/upload-artifact@v7
         with: { name: action-dist, path: dist, if-no-files-found: error, retention-days: 1 }
