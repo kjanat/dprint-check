@@ -248,6 +248,7 @@ jobs:
             echo "- Draft release: [Review ${VERSION}](${RELEASE_URL})"
             echo "- Source commit: [${SOURCE_SHA:0:7}](${GITHUB_SERVER_URL}/${GH_REPO}/commit/${SOURCE_SHA})"
             echo "- Signed release commit: [${RELEASE_SHA:0:7}](${GITHUB_SERVER_URL}/${GH_REPO}/commit/${RELEASE_SHA})"
+            echo "- Tagged Action tree: [${VERSION}](${GITHUB_SERVER_URL}/${GH_REPO}/tree/${VERSION}) (available after publication)"
             echo "- Preparation run: [#${GITHUB_RUN_NUMBER}](${GITHUB_SERVER_URL}/${GH_REPO}/actions/runs/${GITHUB_RUN_ID})"
             echo "- Release workflow: [Open dispatch page](${GITHUB_SERVER_URL}/${GH_REPO}/actions/workflows/release.yml)"
             echo "- Independent rebuild: byte-for-byte identical"
