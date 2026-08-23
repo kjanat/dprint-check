@@ -1,4 +1,5 @@
 import { describe, expect, mock, spyOn, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 import {
@@ -9,8 +10,12 @@ import {
 	parseArgs,
 	parseCheckAnnotations,
 } from "#lib/check";
-import { DPRINT } from "#lib/contracts";
-import { TEST_DPRINT_BINARY } from "#test/helpers";
+import { DPRINT, ENVIRONMENT } from "#lib/contracts";
+import { TEST_DPRINT_BINARY, useTestContext } from "#test/helpers";
+
+const context = useTestContext();
+const fixture = (stream: "stderr" | "stdout", name: string): string =>
+	readFileSync(new URL(`./fixtures/dprint/${stream}/${name}.txt`, import.meta.url), "utf8");
 
 describe("buildCheckArgs", () => {
 	test.each([
@@ -45,6 +50,23 @@ describe("buildCheckArgs", () => {
 	test("rejects an unterminated quote", () => {
 		expect(() => parseArgs("--excludes \"source files")).toThrow(/^Unterminated quote in args input$/u);
 	});
+
+	test("enables dprint debug logging without overriding an explicit log level", () => {
+		expect(buildCheckArgs("", "", true)).toEqual([
+			DPRINT.command.check,
+			DPRINT.command.logLevel,
+			DPRINT.logLevel.debug,
+		]);
+		expect(buildCheckArgs("", `${DPRINT.command.logLevel} warn`, true)).toEqual([
+			DPRINT.command.check,
+			DPRINT.command.logLevel,
+			"warn",
+		]);
+		expect(buildCheckArgs("", `${DPRINT.command.logLevel}=error`, true)).toEqual([
+			DPRINT.command.check,
+			`${DPRINT.command.logLevel}=error`,
+		]);
+	});
 });
 
 describe("parseArgs", () => {
@@ -69,31 +91,65 @@ describe("parseArgs", () => {
 });
 
 describe("parseCheckAnnotations", () => {
-	test("finds files and original lines in dprint diffs", () => {
-		const output = [
-			"\u001B[31mfrom\u001B[0m src/first.ts:",
-			"  12|-old text",
-			"  13|-more old text",
-			"12  |+new text",
-			"--",
-			"from src/line-endings.ts:",
-			" | Text differed by line endings.",
-			"--",
-			"from D:\\code\\windows.ts:",
-			"10 15|-old text",
-			"--",
-		].join("\n");
+	test.each(
+		[
+			{
+				name: "TypeScript replacements",
+				fixture: "check-typescript",
+				expected: [{ file: "typescript.ts", line: 1, endLine: 3 }],
+			},
+			{
+				name: "Markdown non-contiguous replacements",
+				fixture: "check-markdown",
+				expected: [{ file: "markdown.md", line: 3, endLine: 6 }],
+			},
+			{
+				name: "PowerShell single-line replacements",
+				fixture: "check-powershell",
+				expected: [{ file: "powershell.ps1", line: 1 }],
+			},
+			{
+				name: "distant TypeScript replacements",
+				fixture: "check-noncontiguous",
+				expected: [{ file: "noncontiguous.ts", line: 1, endLine: 10 }],
+			},
+			{
+				name: "line-ending-only changes",
+				fixture: "check-line-endings",
+				expected: [{ file: "line-endings.ts" }],
+			},
+			{
+				name: "multiple plugins and files",
+				fixture: "check-multifile",
+				expected: [
+					{ file: "markdown.md", line: 3, endLine: 6 },
+					{ file: "powershell.ps1", line: 1 },
+					{ file: "typescript.ts", line: 1, endLine: 3 },
+				],
+			},
+		] as const,
+	)("parses $name from captured stdout", ({ fixture: name, expected }) => {
+		context.setEnvironment(ENVIRONMENT.githubWorkspace, "/workspace");
+		expect(parseCheckAnnotations(fixture("stdout", name), false)).toEqual([...expected]);
+	});
 
-		expect(parseCheckAnnotations(output, false)).toEqual([
-			{ file: "src/first.ts", line: 12, endLine: 13 },
-			{ file: "src/line-endings.ts" },
-			{ file: "D:\\code\\windows.ts", line: 15 },
+	test("parses captured list-different stdout", () => {
+		context.setEnvironment(ENVIRONMENT.githubWorkspace, "/workspace");
+		expect(parseCheckAnnotations(fixture("stdout", "list-different"), true)).toEqual([
+			{ file: "markdown.md" },
+			{ file: "powershell.ps1" },
+			{ file: "typescript.ts" },
 		]);
 	});
 
-	test("parses list-different output", () => {
+	test.each(["check-debug", "list-different-debug"])("does not parse %s stderr as a diff", name => {
+		expect(parseCheckAnnotations(fixture("stderr", name), false)).toBeEmpty();
+	});
+
+	test("keeps absolute paths outside the workspace", () => {
+		context.setEnvironment(ENVIRONMENT.githubWorkspace, "/workspace");
 		expect(parseCheckAnnotations(`${resolve("src/first.ts")}\r\nsrc/second.ts\r\n`, true)).toEqual([
-			{ file: "src/first.ts" },
+			{ file: resolve("src/first.ts") },
 			{ file: "src/second.ts" },
 		]);
 	});
@@ -140,15 +196,16 @@ test("checks every explicit configuration", async () => {
 	);
 });
 
-test("annotates formatting failures and preserves the rejected error", async () => {
+test("annotates captured formatting failures from stdout and preserves both output streams", async () => {
 	const failure = Object.assign(new Error("dprint check failed"), {
 		code: 20,
-		stdout: "from src/example.ts:\n  7|-old\n  8|-more old\n7  |+new\n--\n",
-		stderr: "Found 1 not formatted file. Run dprint fmt to fix.\n",
+		stdout: fixture("stdout", "check-multifile"),
+		stderr: fixture("stderr", "check-debug"),
 	});
 	const listFailure = Object.assign(new Error("dprint check failed"), {
 		code: 20,
-		stdout: `${resolve("src/example.ts")}\n${resolve("src/no-stable-line.ts")}\n`,
+		stdout: fixture("stdout", "list-different"),
+		stderr: fixture("stderr", "list-different-debug"),
 	});
 	const execute = mock(async () => Promise.reject(execute.mock.calls.length === 1 ? failure : listFailure));
 	const annotate = mock(() => {});
@@ -156,24 +213,36 @@ test("annotates formatting failures and preserves the rejected error", async () 
 	const stderr = spyOn(process.stderr, "write").mockImplementation(() => true);
 
 	try {
-		expect(checkFormatting(TEST_DPRINT_BINARY, "", "", { execute, annotate })).rejects.toBe(failure);
+		context.setEnvironment(ENVIRONMENT.githubWorkspace, "/workspace");
+		expect(checkFormatting(TEST_DPRINT_BINARY, "", "", { execute, annotate, debug: true })).rejects.toBe(failure);
 		expect(execute).toHaveBeenNthCalledWith(2, TEST_DPRINT_BINARY, [
 			DPRINT.command.check,
+			DPRINT.command.logLevel,
+			DPRINT.logLevel.debug,
 			DPRINT.command.listDifferent,
 		], { maxBuffer: 64 * 1024 * 1024 });
-		expect(annotate).toHaveBeenCalledTimes(2);
+		expect(annotate).toHaveBeenCalledTimes(3);
 		expect(annotate).toHaveBeenNthCalledWith(1, "File is not formatted. Run dprint fmt to fix.", {
-			endLine: 8,
-			file: "src/example.ts",
-			line: 7,
+			endLine: 6,
+			file: "markdown.md",
+			line: 3,
 			title: "dprint check",
 		});
 		expect(annotate).toHaveBeenNthCalledWith(2, "File is not formatted. Run dprint fmt to fix.", {
-			file: "src/no-stable-line.ts",
+			file: "powershell.ps1",
+			line: 1,
+			title: "dprint check",
+		});
+		expect(annotate).toHaveBeenNthCalledWith(3, "File is not formatted. Run dprint fmt to fix.", {
+			endLine: 3,
+			file: "typescript.ts",
+			line: 1,
 			title: "dprint check",
 		});
 		expect(isFormattingFailure(failure)).toBeTrue();
+		expect(stdout).toHaveBeenCalledTimes(1);
 		expect(stdout).toHaveBeenCalledWith(failure.stdout);
+		expect(stderr).toHaveBeenCalledTimes(1);
 		expect(stderr).toHaveBeenCalledWith(failure.stderr);
 	} finally {
 		stdout.mockRestore();

@@ -97,17 +97,7 @@ const isCheckFailure = (error: unknown): error is object =>
 	typeof error === "object" && error !== null && Number(exitCode(error)) === DPRINT.checkFailureExitCode;
 
 const listDifferent = async (binaryPath: string, args: string[], execute: Execute): Promise<ExecutionOutput> => {
-	const listArgs: string[] = [];
-	for (let index = 0; index < args.length; index++) {
-		const arg = args[index];
-		if (arg === DPRINT.command.logLevel) {
-			index++;
-			continue;
-		}
-		if (arg?.startsWith(`${DPRINT.command.logLevel}=`) === true) continue;
-		listArgs.push(arg ?? "");
-	}
-	if (!listArgs.includes(DPRINT.command.listDifferent)) listArgs.push(DPRINT.command.listDifferent);
+	const listArgs = args.includes(DPRINT.command.listDifferent) ? args : [...args, DPRINT.command.listDifferent];
 	try {
 		return asOutput(
 			await execute(binaryPath, listArgs, {

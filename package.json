@@ -23,6 +23,7 @@
 		"check": "if [[ \"${CI}\" == \"true\" ]]; then run --parallel biome:check typecheck test knip; else run --parallel fmt:check biome:check typecheck test knip; fi",
 		"fmt": "bunx --silent dprint fmt",
 		"fmt:check": "bunx --silent dprint check",
+		"fixtures:update": "bun run tests/generate-dprint-fixtures.ts",
 		"test": "bun test",
 		"knip": "knip",
 		"typecheck": "tsc --noEmit"

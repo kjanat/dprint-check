@@ -18,7 +18,6 @@ env:
    OWNER: ${{ github.repository_owner }}
 
 
-
   
    SOURCE_SHA: ${{ github.sha }}
    VERSION: ${{ inputs.version || github.event.release.tag_name }}

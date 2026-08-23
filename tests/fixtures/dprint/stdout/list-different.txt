@@ -1,0 +1,3 @@
+/workspace/markdown.md
+/workspace/powershell.ps1
+/workspace/typescript.ts

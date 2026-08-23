@@ -10,6 +10,7 @@ import {
 	getInput,
 	getState,
 	info,
+	isDebug,
 	saveState,
 	setOutput,
 	setSecret,
@@ -78,6 +79,13 @@ describe("GitHub file commands", () => {
 test("reads action state", () => {
 	context.setEnvironment("STATE_CACHE_KEY", "dprint-cache-key");
 	expect(getState("CACHE_KEY")).toBe("dprint-cache-key");
+});
+
+test("detects runner debug mode", () => {
+	context.setEnvironment(ENVIRONMENT.runnerDebug, "1");
+	expect(isDebug()).toBeTrue();
+	context.setEnvironment(ENVIRONMENT.runnerDebug, "0");
+	expect(isDebug()).toBeFalse();
 });
 
 test("emits escaped workflow commands when file commands are unavailable", () => {

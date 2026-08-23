@@ -16,7 +16,7 @@ test("warms every discovered config sequentially", async () => {
 		active--;
 	});
 
-	expect(await warmupPlugins(TEST_DPRINT_BINARY, configs, execute)).toBeTrue();
+	expect(await warmupPlugins(TEST_DPRINT_BINARY, configs, { execute })).toBeTrue();
 	expect(maximumActive).toBe(1);
 	expect(execute).toHaveBeenNthCalledWith(1, TEST_DPRINT_BINARY, [
 		DPRINT.command.warmup,
@@ -41,7 +41,7 @@ test("warms every discovered config sequentially", async () => {
 test("does nothing when no configs are discovered", async () => {
 	const execute = mock(async () => {});
 
-	expect(await warmupPlugins(TEST_DPRINT_BINARY, [], execute)).toBeTrue();
+	expect(await warmupPlugins(TEST_DPRINT_BINARY, [], { execute })).toBeTrue();
 	expect(execute).not.toHaveBeenCalled();
 });
 
@@ -51,7 +51,7 @@ test("warms a remote config from the workspace", async () => {
 	context.setEnvironment(ENVIRONMENT.githubWorkspace, workspace);
 	const execute = mock(async () => {});
 
-	expect(await warmupPlugins(TEST_DPRINT_BINARY, [config], execute)).toBeTrue();
+	expect(await warmupPlugins(TEST_DPRINT_BINARY, [config], { execute })).toBeTrue();
 	expect(execute).toHaveBeenCalledWith(
 		TEST_DPRINT_BINARY,
 		[DPRINT.command.warmup, DPRINT.command.config, config],
@@ -70,7 +70,7 @@ test("stops after a non-timeout warmup failure", async () => {
 	const stdout = spyOn(process.stdout, "write").mockImplementation(() => true);
 
 	try {
-		expect(await warmupPlugins(TEST_DPRINT_BINARY, ["one.json", "two.json"], execute)).toBeFalse();
+		expect(await warmupPlugins(TEST_DPRINT_BINARY, ["one.json", "two.json"], { execute })).toBeFalse();
 		expect(execute).toHaveBeenCalledTimes(1);
 		expect(stdout).toHaveBeenCalledWith("::warning::Plugin warmup failed: invalid config\n");
 	} finally {
@@ -83,8 +83,25 @@ test(`retries a hung warmup ${WARMUP_ATTEMPTS} times`, () => {
 		throw Object.assign(new Error("timed out"), { killed: true, signal: "SIGTERM" });
 	});
 
-	expect(warmupPlugins(TEST_DPRINT_BINARY, ["dprint.json"], execute)).rejects.toThrow(
+	expect(warmupPlugins(TEST_DPRINT_BINARY, ["dprint.json"], { execute })).rejects.toThrow(
 		`Plugin warmup kept hanging after ${WARMUP_ATTEMPTS} attempts`,
 	);
 	expect(execute).toHaveBeenCalledTimes(WARMUP_ATTEMPTS);
+});
+
+test("enables dprint debug logging during plugin warmup", async () => {
+	const execute = mock(async () => {});
+
+	expect(await warmupPlugins(TEST_DPRINT_BINARY, ["dprint.json"], { debug: true, execute })).toBeTrue();
+	expect(execute).toHaveBeenCalledWith(
+		TEST_DPRINT_BINARY,
+		[
+			DPRINT.command.warmup,
+			DPRINT.command.config,
+			"dprint.json",
+			DPRINT.command.logLevel,
+			DPRINT.logLevel.debug,
+		],
+		expect.any(Object),
+	);
 });
