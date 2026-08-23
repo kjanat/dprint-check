@@ -120,6 +120,8 @@ jobs:
         uses: ./
         with: { install-only: true, dprint-version: "${{ env.DPRINT_VERSION }}" }
       - name: Verify exact cache hits
+        env: { OUTPUTS: "${{ toJSON(steps.dprint.outputs) }}" }
         run: |
-          if ("${{ steps.dprint.outputs.cache-hit }}"        -ne "true") { throw "Expected binary cache hit" }
-          if ("${{ steps.dprint.outputs.plugin-cache-hit }}" -ne "true") { throw "Expected plugin cache hit" }
+          $outputs = $env:OUTPUTS | ConvertFrom-Json
+          if ($outputs.'cache-hit'        -ne "true") { throw "Expected binary cache hit" }
+          if ($outputs.'plugin-cache-hit' -ne "true") { throw "Expected plugin cache hit" }
