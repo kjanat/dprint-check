@@ -53,6 +53,18 @@ Write-ReleaseError 'release failed'
 		expect(failure?.stdout.trimEnd()).toBe("::error::release failed");
 	});
 
+	test("consumes expected native probe failures", async () => {
+		const output = await invokePowerShell(`
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+$PSNativeCommandUseErrorActionPreference = $true
+. '${commonScript}'
+$succeeded = Test-NativeCommand { pwsh -NoProfile -NonInteractive -Command 'exit 7' }
+"$succeeded|$LASTEXITCODE"
+`);
+		expect(output).toBe("False|0");
+	});
+
 	test("renders valid Markdown before generated release notes", async () => {
 		const output = await invokePowerShell(`
 . '${commonScript}'

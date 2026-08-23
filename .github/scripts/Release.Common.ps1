@@ -76,7 +76,9 @@ function Test-NativeCommand([scriptblock] $Command) {
 	try {
 		$PSNativeCommandUseErrorActionPreference = $false
 		& $Command *> $null
-		return $LASTEXITCODE -eq 0
+		$succeeded = $LASTEXITCODE -eq 0
+		$global:LASTEXITCODE = 0
+		return $succeeded
 	}
 	finally {
 		$PSNativeCommandUseErrorActionPreference = $previousPreference
