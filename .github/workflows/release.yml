@@ -6,15 +6,14 @@ on:
   release: { types: [published] }
   workflow_dispatch:
     inputs:
-      version:
-        description: Stable semantic version to release (for example, v3.0.0)
-        required: true
-        type: string
+      version: { description: "Stable semantic version to release (for example, v3.0.0)", required: true, type: string }
 concurrency: { group: release, queue: single }
 permissions: { contents: read }
 env:
   CANDIDATE_ARTIFACT: release-candidate-${{ github.run_id }}-${{ github.run_attempt }}
   DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+  GH_REPO: ${{ github.repository }}
+  OWNER: ${{ github.repository_owner }}
   SOURCE_SHA: ${{ github.sha }}
   VERSION: ${{ inputs.version || github.event.release.tag_name }}
 defaults: { run: { shell: bash } }
@@ -59,13 +58,13 @@ jobs:
           }
           verified="$(gh api \
             -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
-            "repos/${GITHUB_REPOSITORY}/commits/${SOURCE_SHA}" \
+            "repos/{owner}/{repo}/commits/${SOURCE_SHA}" \
             --jq .commit.verification.verified)"
           [[ "${verified}" == "true" ]] || {
             echo "Source commit ${SOURCE_SHA} is not verified" >&2
             exit 1
           }
-          if gh release view "${VERSION}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
+          if gh release view "${VERSION}" >/dev/null 2>&1; then
             echo "Release ${VERSION} already exists" >&2
             exit 1
           fi
@@ -114,8 +113,8 @@ jobs:
           (cd candidate && sha256sum --check SHA256SUMS)
           for file in candidate/dist/main.mjs candidate/dist/post.mjs; do
             gh attestation verify "${file}" \
-              --repo "${GITHUB_REPOSITORY}" \
-              --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/release.yml" \
+              --owner "${OWNER}" \
+              --signer-workflow "${GH_REPO}/.github/workflows/release.yml" \
               --source-digest "${SOURCE_SHA}" \
               --source-ref "refs/heads/${DEFAULT_BRANCH}" \
               --deny-self-hosted-runners
@@ -153,7 +152,7 @@ jobs:
               '{content: $content, encoding: "base64"}' > "${RUNNER_TEMP}/blob-request.json"
             gh api --method POST \
               -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
-              "repos/${GITHUB_REPOSITORY}/git/blobs" \
+              "repos/{owner}/{repo}/git/blobs" \
               --input "${RUNNER_TEMP}/blob-request.json" \
               --jq .sha
           }
@@ -163,7 +162,7 @@ jobs:
           sums_blob="$(create_blob candidate/SHA256SUMS)"
           source_tree="$(gh api \
             -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
-            "repos/${GITHUB_REPOSITORY}/git/commits/${SOURCE_SHA}" \
+            "repos/{owner}/{repo}/git/commits/${SOURCE_SHA}" \
             --jq .tree.sha)"
 
           jq -n \
@@ -181,7 +180,7 @@ jobs:
             }' > "${RUNNER_TEMP}/tree-request.json"
           release_tree="$(gh api --method POST \
             -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
-            "repos/${GITHUB_REPOSITORY}/git/trees" \
+            "repos/{owner}/{repo}/git/trees" \
             --input "${RUNNER_TEMP}/tree-request.json" \
             --jq .sha)"
 
@@ -195,7 +194,7 @@ jobs:
             > "${RUNNER_TEMP}/commit-request.json"
           gh api --method POST \
             -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
-            "repos/${GITHUB_REPOSITORY}/git/commits" \
+            "repos/{owner}/{repo}/git/commits" \
             --input "${RUNNER_TEMP}/commit-request.json" \
             > "${RUNNER_TEMP}/release-commit.json"
           release_sha="$(jq -r .sha < "${RUNNER_TEMP}/release-commit.json")"
@@ -206,13 +205,11 @@ jobs:
           }
 
           gh release create "${VERSION}" candidate/SHA256SUMS \
-            --repo "${GITHUB_REPOSITORY}" \
             --target "${release_sha}" \
             --title "${VERSION}" \
             --generate-notes \
             --draft
           release_json="$(gh release view "${VERSION}" \
-            --repo "${GITHUB_REPOSITORY}" \
             --json isDraft,tagName,targetCommitish,url)"
           is_draft="$(jq -r .isDraft <<< "${release_json}")"
           tag_name="$(jq -r .tagName <<< "${release_json}")"
@@ -229,8 +226,8 @@ jobs:
           {
             echo "## ${VERSION} is ready for review"
             echo
-            echo "- Source commit: \`${SOURCE_SHA}\`"
-            echo "- Signed release commit: \`${RELEASE_SHA}\`"
+            echo "- Source commit: ${SOURCE_SHA}"
+            echo "- Signed release commit: ${RELEASE_SHA}"
             echo "- Independent rebuild: byte-for-byte identical"
             echo "- Bundle provenance: attested"
             echo
@@ -267,7 +264,7 @@ jobs:
             echo "Version must be a stable semantic version prefixed with v" >&2
             exit 1
           }
-          gh release verify "${VERSION}" --repo "${GITHUB_REPOSITORY}"
+          gh release verify "${VERSION}"
           release_sha="$(git -C release rev-parse HEAD)"
           source_sha="$(git -C release rev-parse HEAD^)"
           trailer="$(git -C release log -1 --format='%(trailers:key=Source-Commit,valueonly)')"
@@ -277,7 +274,7 @@ jobs:
           }
           verified="$(gh api \
             -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
-            "repos/${GITHUB_REPOSITORY}/commits/${release_sha}" \
+            "repos/{owner}/{repo}/commits/${release_sha}" \
             --jq .commit.verification.verified)"
           [[ "${verified}" == "true" ]] || {
             echo "Release commit ${release_sha} is not verified" >&2
@@ -308,8 +305,8 @@ jobs:
           (cd release && sha256sum --check SHA256SUMS)
           for file in release/dist/main.mjs release/dist/post.mjs; do
             gh attestation verify "${file}" \
-              --repo "${GITHUB_REPOSITORY}" \
-              --signer-workflow "${GITHUB_REPOSITORY}/.github/workflows/release.yml" \
+              --owner "${OWNER}" \
+              --signer-workflow "${GH_REPO}/.github/workflows/release.yml" \
               --source-digest "${SOURCE_SHA}" \
               --source-ref "refs/heads/${DEFAULT_BRANCH}" \
               --deny-self-hosted-runners
@@ -333,22 +330,22 @@ jobs:
           set -euo pipefail
           if gh api \
             -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
-            "repos/${GITHUB_REPOSITORY}/git/ref/tags/${MAJOR}" >/dev/null 2>&1; then
+            "repos/{owner}/{repo}/git/ref/tags/${MAJOR}" >/dev/null 2>&1; then
             gh api --method PATCH \
               -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
-              "repos/${GITHUB_REPOSITORY}/git/refs/tags/${MAJOR}" \
+              "repos/{owner}/{repo}/git/refs/tags/${MAJOR}" \
               -f sha="${RELEASE_SHA}" \
               -F force=true >/dev/null
           else
             gh api --method POST \
               -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
-              "repos/${GITHUB_REPOSITORY}/git/refs" \
+              "repos/{owner}/{repo}/git/refs" \
               -f ref="refs/tags/${MAJOR}" \
               -f sha="${RELEASE_SHA}" >/dev/null
           fi
           actual="$(gh api \
             -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
-            "repos/${GITHUB_REPOSITORY}/git/ref/tags/${MAJOR}" \
+            "repos/{owner}/{repo}/git/ref/tags/${MAJOR}" \
             --jq .object.sha)"
           [[ "${actual}" == "${RELEASE_SHA}" ]] || {
             echo "${MAJOR} points to ${actual}, expected ${RELEASE_SHA}" >&2
