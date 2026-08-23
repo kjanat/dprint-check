@@ -66,13 +66,17 @@ foreach ($path in $releasePaths) {
 	Assert-FilesIdentical (Join-Path source $path) (Join-Path release $path)
 }
 
-foreach ($path in $releasePaths) {
+for ($index = 0; $index -lt $releasePaths.Count; $index++) {
+	$path = $releasePaths[$index]
 	$assetName = Split-Path -Leaf $path
 	$file = Join-Path published $path
 	$directory = Split-Path -Parent $file
 	New-Item -ItemType Directory -Path $directory -Force | Out-Null
 	gh release download $version --pattern $assetName --dir $directory
-	gh release verify-asset $version $file
+	gh release verify-asset $version $file | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+	if ($index -lt $releasePaths.Count - 1) {
+		Write-Output ''
+	}
 }
 Assert-ReleaseChecksum -Root published
 foreach ($path in $releasePaths) {
