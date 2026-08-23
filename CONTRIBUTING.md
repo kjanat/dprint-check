@@ -78,9 +78,15 @@ See GitHub's documentation for [immutable releases], [artifact attestations],
    ```
 
 2. Confirm CI is green and the default-branch HEAD has a verified signature.
-3. From the Actions page, manually dispatch the `Release` workflow on the
-   default branch with the matching `vX.Y.Z` version. This is the only supported
-   way to prepare a release; it creates a draft but does not publish it.
+3. Manually dispatch the `Release` workflow on the default branch with the
+   matching `vX.Y.Z` version, either from the Actions page or with GitHub CLI:
+
+   ```sh
+   gh workflow run release.yml --ref main -f version=vX.Y.Z
+   ```
+
+   This workflow dispatch is the only supported way to prepare a release. It
+   creates a draft but does not publish it.
 4. Wait for the workflow to create the draft release. It builds and attests the
    bundle, independently rebuilds it, and creates a signed release commit whose
    only changes from the source commit are:

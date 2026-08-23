@@ -23,7 +23,9 @@ jobs:
   build:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    outputs: { github-api-version: "${{ steps.github-api.outputs.version }}" }
+    outputs:
+      attestation-url: "${{ steps.attestation.outputs.attestation-url }}"
+      github-api-version: "${{ steps.github-api.outputs.version }}"
     permissions:
       artifact-metadata: write
       attestations: write
@@ -80,6 +82,7 @@ jobs:
       - name: Hash release bundle
         run: sha256sum dist/main.mjs dist/post.mjs > SHA256SUMS
       - name: Attest release bundle
+        id: attestation
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
         with: { subject-checksums: SHA256SUMS }
       - name: Upload release candidate
@@ -215,13 +218,55 @@ jobs:
             exit 1
           }
 
+          stable_versions="$(
+            gh api --paginate \
+              -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
+              "repos/{owner}/{repo}/releases?per_page=100" \
+              --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name' \
+              | grep -E '^v[0-9]+\.[0-9]+(\.[0-9]+)?$' || true
+          )"
+          previous_version="$(
+            printf '%s\n%s\n' "${stable_versions}" "${VERSION}" \
+              | awk 'NF' \
+              | sort -Vu \
+              | awk -v version="${VERSION}" '$0 == version { print previous; exit } { previous = $0 }'
+          )"
+          release_options=(--generate-notes)
+          if [[ -n "${previous_version}" ]]; then
+            release_options+=(--notes-start-tag "${previous_version}")
+            previous_commit="$(gh api \
+              -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
+              "repos/{owner}/{repo}/commits/${previous_version}" \
+              --jq .sha)"
+            previous_source="$(gh api \
+              -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
+              "repos/{owner}/{repo}/commits/${previous_version}" \
+              --jq .commit.message \
+              | git interpret-trailers --parse \
+              | awk '$1 == "Source-Commit:" { print $2; exit }')"
+            previous_source="${previous_source:-${previous_commit}}"
+            release_commits="$(gh api \
+              -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
+              "repos/{owner}/{repo}/compare/${previous_source}...${SOURCE_SHA}" \
+              --jq '.commits[] | [.sha, (.commit.message | split("\n")[0])] | @tsv')"
+            if [[ -n "${release_commits}" ]]; then
+              notes="## Changes"
+              while IFS=$'\t' read -r sha subject; do
+                printf -v commit_note -- "- [\`%s\`](%s/%s/commit/%s) %s" \
+                  "${sha:0:7}" "${GITHUB_SERVER_URL}" "${GH_REPO}" "${sha}" "${subject}"
+                notes+=$'\n'"${commit_note}"
+              done <<< "${release_commits}"
+              release_options+=(--notes "${notes}")
+            fi
+          fi
+
           gh release create "${VERSION}" \
             candidate/SHA256SUMS \
             candidate/dist/main.mjs \
             candidate/dist/post.mjs \
             --target "${release_sha}" \
             --title "${VERSION}" \
-            --generate-notes \
+            "${release_options[@]}" \
             --draft
           release_json="$(gh release view "${VERSION}" \
             --json isDraft,tagName,targetCommitish,url)"
@@ -239,6 +284,7 @@ jobs:
           echo "Draft release: ${release_url}"
       - name: Summarize release gate
         env:
+          ATTESTATION_URL: "${{ needs.build.outputs.attestation-url }}"
           RELEASE_SHA: "${{ steps.release.outputs.release-sha }}"
           RELEASE_URL: "${{ steps.release.outputs.release-url }}"
         run: |
@@ -251,8 +297,21 @@ jobs:
             echo "- Tagged Action tree: [${VERSION}](${GITHUB_SERVER_URL}/${GH_REPO}/tree/${VERSION}) (available after publication)"
             echo "- Preparation run: [#${GITHUB_RUN_NUMBER}](${GITHUB_SERVER_URL}/${GH_REPO}/actions/runs/${GITHUB_RUN_ID})"
             echo "- Release workflow: [Open dispatch page](${GITHUB_SERVER_URL}/${GH_REPO}/actions/workflows/release.yml)"
+            echo
+            echo "### Dispatch input"
+            echo
+            echo '```text'
+            echo "${VERSION}"
+            echo '```'
+            echo
+            echo "Or prepare it with GitHub CLI:"
+            echo
+            echo '```sh'
+            echo "gh workflow run release.yml -R ${GH_REPO} --ref ${DEFAULT_BRANCH} -f version=${VERSION}"
+            echo '```'
+            echo
             echo "- Independent rebuild: byte-for-byte identical"
-            echo "- Bundle provenance: attested"
+            echo "- Bundle provenance: [attested](${ATTESTATION_URL})"
             echo
             echo "Publish the draft only after immutable releases are enabled."
           } >> "${GITHUB_STEP_SUMMARY}"

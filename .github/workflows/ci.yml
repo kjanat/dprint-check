@@ -1,35 +1,43 @@
 # yaml-language-server: $schema=https://www.schemastore.org/github-workflow.json
 ---
 name: CI
-on: [push, pull_request]
-concurrency: { group: "${{ github.head_ref || github.run_id }}", queue: single, cancel-in-progress: true }
+on:
+  push: { branches: [main] }
+  pull_request:
+concurrency:
+  group: "${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}"
+  queue: single
+  cancel-in-progress: true
 permissions: { contents: read }
-env: { DPRINT_VERSION: "0.56.1", NODE_VERSION: "24" }
+env:
+  CACHE_TEST_CONFIG: ".cache-test-${{ github.run_id }}-${{ github.run_attempt }}.json"
+  DPRINT_VERSION: "0.56.1"
+  NODE_VERSION: "24"
 defaults: { run: { shell: pwsh } }
 jobs:
   quality:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-node@v7
+      - uses: &checkout-action actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
         with: { node-version: "${{ env.NODE_VERSION }}" }
       # setup-bun already detects packageManager from package.json
-      - uses: oven-sh/setup-bun@v2
-      - uses: kjanat/runner@master
-      - run: runner i -f build
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+      - run: bun install --frozen-lockfile
+      - run: bun run build
       - name: Validate built action
         run: |
           foreach ($file in @("dist/main.mjs", "dist/post.mjs")) {
             if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing $file" }
             node --check $file
           }
-      - uses: kjanat/actionlint@v1
-      - run: run -pk biome:check typecheck test
+      - uses: kjanat/actionlint@7c5b0a3880b3d29c51072b1e5e0730e5988f8b7d # v1
+      - run: bun run --parallel biome:check typecheck test knip
       - name: dprint check (action)
         uses: ./
         with: { dprint-version: "${{ env.DPRINT_VERSION }}", config-path: dprint.json, cache: false }
       - name: Upload built action
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with: { name: action-dist, path: dist, if-no-files-found: error, retention-days: 1 }
 
   behavior:
@@ -40,16 +48,16 @@ jobs:
       - name: Use LF line endings
         uses: $/actions/git-lf
 
-      - uses: actions/checkout@v7
+      - uses: *checkout-action
       - &download-action
         name: Download built action
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with: { name: action-dist, path: dist }
 
       - name: Check formatting
         id: dprint
         uses: ./
-        with: { dprint-version: "${{ env.DPRINT_VERSION }}" }
+        with: { dprint-version: "${{ env.DPRINT_VERSION }}", cache: false }
 
       - name: Verify installation outputs
         env: { OUTPUTS: "${{ toJSON(steps.dprint.outputs) }}" }
@@ -57,6 +65,9 @@ jobs:
           $outputs = $env:OUTPUTS | ConvertFrom-Json
           if ($outputs.version -ne $env:DPRINT_VERSION)        { throw "Wrong dprint version"  }
           if (-not (Test-Path -LiteralPath $outputs.location)) { throw "Missing dprint binary" }
+          if ($outputs.'cache-hit'        -ne "false")         { throw "Unexpected binary cache hit" }
+          if ($outputs.'plugin-cache-hit' -ne "false")         { throw "Unexpected plugin cache hit" }
+          if ($outputs.'plugin-cache-key' -ne "")              { throw "Unexpected plugin cache key" }
           dprint --version
 
       - name: Make poorly formatted JSON file
@@ -68,42 +79,35 @@ jobs:
           dprint-version: ${{ env.DPRINT_VERSION }}
           config-path: dprint.json
           args: --excludes poorly-formatted.json
+          cache: false
 
-  install-only:
+  install-latest:
     needs: quality
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: *checkout-action
       - *download-action
       - env: { BAD_JSON: '{"a": 1, "b": 2}' }
         run: '[IO.File]::WriteAllText((Join-Path $PWD "poorly-formatted.json"), $env:BAD_JSON)'
       - id: dprint
         uses: ./
-        with: { install-only: true, dprint-version: "${{ env.DPRINT_VERSION }}" }
+        with: { install-only: true, cache: false }
       - name: Use installed dprint
-        env: { OUTPUTS: "${{ toJSON(steps.dprint.outputs) }}" }
+        env:
+          BAD_JSON: '{"a": 1, "b": 2}'
+          OUTPUTS: "${{ toJSON(steps.dprint.outputs) }}"
         run: |
           $outputs = $env:OUTPUTS | ConvertFrom-Json
+          $path = Join-Path $PWD "poorly-formatted.json"
+          if ([IO.File]::ReadAllText($path) -ne $env:BAD_JSON)  { throw "install-only formatted a file" }
+          if ($outputs.'cache-hit'        -ne "false")         { throw "Unexpected binary cache hit" }
+          if ($outputs.'plugin-cache-hit' -ne "false")         { throw "Unexpected plugin cache hit" }
+          if ($outputs.'plugin-cache-key' -ne "")              { throw "Unexpected plugin cache key" }
+          if (-not (Test-Path -LiteralPath $outputs.location)) { throw "Missing dprint binary" }
+          $installedVersion = ((dprint --version) -split '\s+')[-1]
+          if ($outputs.version -ne $installedVersion)          { throw "Wrong latest dprint version" }
           dprint fmt poorly-formatted.json
           dprint check poorly-formatted.json
-          if (-not (Test-Path -LiteralPath $outputs.location)) { throw "Missing dprint binary" }
-
-  no-cache:
-    needs: quality
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - *download-action
-      - id: dprint
-        uses: ./
-        with: { cache: false, dprint-version: "${{ env.DPRINT_VERSION }}" }
-      - name: Verify cache outputs
-        env: { OUTPUTS: "${{ toJSON(steps.dprint.outputs) }}" }
-        run: |
-          $outputs = $env:OUTPUTS | ConvertFrom-Json
-          if ($outputs.'cache-hit'        -ne "false") { throw "Unexpected binary cache hit" }
-          if ($outputs.'plugin-cache-hit' -ne "false") { throw "Unexpected plugin cache hit" }
-          if ($outputs.'plugin-cache-key' -ne "")      { throw "Unexpected plugin cache key" }
 
   cache-prime:
     needs: quality
@@ -113,10 +117,28 @@ jobs:
     steps:
       - name: Use LF line endings
         uses: $/actions/git-lf
-      - uses: actions/checkout@v7
+      - uses: *checkout-action
       - *download-action
-      - uses: ./
-        with: { install-only: true, dprint-version: "${{ env.DPRINT_VERSION }}" }
+      - name: Create unique config and formatting failure
+        env: { BAD_JSON: '{"a": 1, "b": 2}' }
+        run: |
+          Copy-Item -LiteralPath dprint.json -Destination $env:CACHE_TEST_CONFIG
+          [IO.File]::WriteAllText((Join-Path $PWD "poorly-formatted.json"), $env:BAD_JSON)
+      - id: dprint
+        continue-on-error: true
+        uses: ./
+        with:
+          dprint-version: "${{ env.DPRINT_VERSION }}"
+          config-path: "${{ env.CACHE_TEST_CONFIG }}"
+      - name: Verify cache miss and formatting failure
+        env:
+          OUTCOME: "${{ steps.dprint.outcome }}"
+          OUTPUTS: "${{ toJSON(steps.dprint.outputs) }}"
+        run: |
+          $outputs = $env:OUTPUTS | ConvertFrom-Json
+          if ($env:OUTCOME -ne "failure")                      { throw "Expected formatting failure" }
+          if ($outputs.'plugin-cache-hit' -ne "false")         { throw "Expected plugin cache miss" }
+          if ($outputs.'plugin-cache-key' -eq "")              { throw "Expected plugin cache key" }
 
   cache-hit:
     needs: [quality, cache-prime]
@@ -125,14 +147,19 @@ jobs:
     steps:
       - name: Use LF line endings
         uses: $/actions/git-lf
-      - uses: actions/checkout@v7
+      - uses: *checkout-action
       - *download-action
+      - name: Recreate unique config
+        run: Copy-Item -LiteralPath dprint.json -Destination $env:CACHE_TEST_CONFIG
       - id: dprint
         uses: ./
-        with: { install-only: true, dprint-version: "${{ env.DPRINT_VERSION }}" }
+        with:
+          dprint-version: "${{ env.DPRINT_VERSION }}"
+          config-path: "${{ env.CACHE_TEST_CONFIG }}"
       - name: Verify exact cache hits
         env: { OUTPUTS: "${{ toJSON(steps.dprint.outputs) }}" }
         run: |
           $outputs = $env:OUTPUTS | ConvertFrom-Json
           if ($outputs.'cache-hit'        -ne "true") { throw "Expected binary cache hit" }
           if ($outputs.'plugin-cache-hit' -ne "true") { throw "Expected plugin cache hit" }
+          if ($outputs.'plugin-cache-key' -eq "")     { throw "Expected plugin cache key" }
