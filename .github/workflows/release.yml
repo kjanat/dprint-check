@@ -3,10 +3,12 @@
 name: Release
 run-name: ${{ case(github.event_name == 'workflow_dispatch', format('Prepare {0} from {1}', inputs.version, github.sha), format('Finalize {0}', github.event.release.tag_name)) }}
 on:
-  release: { types: [published] }
+  # prepares artifacts, verifies them, creates the signed release commit, and creates a draft.
   workflow_dispatch:
     inputs:
       version: { description: "Stable semantic version to release (for example, v3.0.0)", required: true, type: string }
+  # reacts after a maintainer publishes that draft, then verifies everything and moves floating tags.
+  release: { types: [published] }
 concurrency: { group: release, queue: single }
 permissions: { contents: read }
 env:

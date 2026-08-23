@@ -20,7 +20,7 @@
 		"biome:check": "biome check",
 		"build": "run --runtime=bun tsdown",
 		"build:watch": "run -q build --watch",
-		"check": "run --parallel fmt:check biome:check typecheck test",
+		"check": "run --parallel fmt:check biome:check typecheck test knip",
 		"fmt": "run -q dprint fmt",
 		"fmt:check": "run -q dprint check",
 		"test": "bun test",
