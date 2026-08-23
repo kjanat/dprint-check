@@ -12,15 +12,12 @@ on:
 concurrency: { group: release, queue: single }
 permissions: { contents: read }
 env:
-   CANDIDATE_ARTIFACT: release-candidate-${{ github.run_id }}-${{ github.run_attempt }}
-   DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
-   GH_REPO: ${{ github.repository }}
-   OWNER: ${{ github.repository_owner }}
-
-
-  
-   SOURCE_SHA: ${{ github.sha }}
-   VERSION: ${{ inputs.version || github.event.release.tag_name }}
+  CANDIDATE_ARTIFACT: release-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+  DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+  GH_REPO: ${{ github.repository }}
+  OWNER: ${{ github.repository_owner }}
+  SOURCE_SHA: ${{ github.sha }}
+  VERSION: ${{ inputs.version || github.event.release.tag_name }}
 defaults: { run: { shell: pwsh } }
 jobs:
   build:
