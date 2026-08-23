@@ -14,11 +14,14 @@ jobs:
       - { uses: actions/setup-node@v7, with: { node-version: 24 } }
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
+      - run: bun run build
       - run: bun run check
-      - run: dprint check
-      - run: git diff --exit-code -- dist
+      - name: Upload built action
+        uses: actions/upload-artifact@v7
+        with: { name: action-dist, path: dist, if-no-files-found: error, retention-days: 1 }
 
   behavior:
+    needs: quality
     runs-on: ${{ matrix.os }}
     strategy: { matrix: { os: [ubuntu-latest, macos-latest, windows-latest] } }
     steps:
@@ -26,10 +29,14 @@ jobs:
         uses: $/actions/git-lf
 
       - uses: actions/checkout@v7
+      - &download-action
+        name: Download built action
+        uses: actions/download-artifact@v8
+        with: { name: action-dist, path: dist }
 
       - name: Check formatting
         id: dprint
-        uses: $/action.yml
+        uses: ./
         with: { dprint-version: "${{ env.DPRINT_VERSION }}" }
 
       - name: Verify installation outputs
@@ -44,21 +51,23 @@ jobs:
         env: { BAD_JSON: '{"a": 1, "b": 2}' }
         run: Set-Content -NoNewline poorly-formatted.json $env:BAD_JSON
       - name: Check formatting with excludes
-        uses: $/action.yml
+        uses: ./
         with:
           dprint-version: ${{ env.DPRINT_VERSION }}
           config-path: dprint.json
           args: --excludes poorly-formatted.json
 
   install-only:
+    needs: quality
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - *download-action
       - env: { BAD_JSON: '{"a": 1, "b": 2}' }
         run: Set-Content -NoNewline poorly-formatted.json $env:BAD_JSON
       - id: dprint
-        uses: $/action.yml
-        with: { run-check: false, dprint-version: "${{ env.DPRINT_VERSION }}" }
+        uses: ./
+        with: { install-only: true, dprint-version: "${{ env.DPRINT_VERSION }}" }
       - name: Use installed dprint
         env: { OUTPUTS: "${{ toJSON(steps.dprint.outputs) }}" }
         run: |
@@ -68,11 +77,13 @@ jobs:
           if (-not (Test-Path -LiteralPath $outputs.location)) { throw "Missing dprint binary" }
 
   no-cache:
+    needs: quality
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+      - *download-action
       - id: dprint
-        uses: $/action.yml
+        uses: ./
         with: { cache: false, dprint-version: "${{ env.DPRINT_VERSION }}" }
       - name: Verify cache outputs
         env: { OUTPUTS: "${{ toJSON(steps.dprint.outputs) }}" }
@@ -83,6 +94,7 @@ jobs:
           if ($outputs.'plugin-cache-key' -ne "")      { throw "Unexpected plugin cache key" }
 
   cache-prime:
+    needs: quality
     runs-on: ${{ matrix.os }}
     strategy:
       matrix: { os: [ubuntu-latest, macos-latest, windows-latest] }
@@ -90,20 +102,22 @@ jobs:
       - name: Use LF line endings
         uses: $/actions/git-lf
       - uses: actions/checkout@v7
-      - uses: $/action.yml
-        with: { run-check: false, dprint-version: "${{ env.DPRINT_VERSION }}" }
+      - *download-action
+      - uses: ./
+        with: { install-only: true, dprint-version: "${{ env.DPRINT_VERSION }}" }
 
   cache-hit:
-    needs: cache-prime
+    needs: [quality, cache-prime]
     runs-on: ${{ matrix.os }}
     strategy: { matrix: { os: [ubuntu-latest, macos-latest, windows-latest] } }
     steps:
       - name: Use LF line endings
         uses: $/actions/git-lf
       - uses: actions/checkout@v7
+      - *download-action
       - id: dprint
-        uses: $/action.yml
-        with: { run-check: false, dprint-version: "${{ env.DPRINT_VERSION }}" }
+        uses: ./
+        with: { install-only: true, dprint-version: "${{ env.DPRINT_VERSION }}" }
       - name: Verify exact cache hits
         run: |
           if ("${{ steps.dprint.outputs.cache-hit }}"        -ne "true") { throw "Expected binary cache hit" }
