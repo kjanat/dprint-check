@@ -1,7 +1,80 @@
+import { stripVTControlCharacters } from "node:util";
+
+import { error as annotateError } from "#lib/actions";
 import { DPRINT } from "#lib/contracts";
 import { execFileAsync } from "#lib/exec";
 
-type Execute = (commandLine: string, args: string[]) => Promise<unknown>;
+interface CheckAnnotation {
+	file: string;
+	line?: number;
+}
+
+interface ExecutionOutput {
+	stderr?: string | Buffer;
+	stdout?: string | Buffer;
+}
+
+interface CheckOptions {
+	annotations?: boolean;
+	annotate?: Annotate;
+	execute?: Execute;
+}
+
+type Execute = (commandLine: string, args: string[], options: { maxBuffer: number }) => Promise<unknown>;
+type Annotate = (message: string, properties: CheckAnnotation & { title: string }) => void;
+
+const CHECK_MAX_BUFFER = 64 * 1024 * 1024;
+const ANNOTATION_MESSAGE = "File is not formatted. Run dprint fmt to fix.";
+const ANNOTATION_TITLE = "dprint check";
+
+const asOutput = (value: unknown): ExecutionOutput => typeof value === "object" && value !== null ? value : {};
+
+const outputText = (value: string | Buffer | undefined): string => value === undefined ? "" : String(value);
+
+const writeOutput = ({ stderr, stdout }: ExecutionOutput): void => {
+	if (stdout !== undefined && stdout.length !== 0) process.stdout.write(stdout);
+	if (stderr !== undefined && stderr.length !== 0) process.stderr.write(stderr);
+};
+
+const originalLine = (line: string): number | undefined => {
+	const separator = line.indexOf("|");
+	if (separator === -1 || line[separator + 1] !== "-") return undefined;
+	const numbers = line.slice(0, separator).match(/\d+/gu);
+	return numbers === null ? undefined : Number(numbers.at(-1));
+};
+
+export const parseCheckAnnotations = (output: string, listDifferent: boolean): CheckAnnotation[] => {
+	const lines = stripVTControlCharacters(output).split(/\r?\n/u);
+	if (listDifferent) return lines.filter((line) => line !== "").map((file) => ({ file }));
+
+	const annotations: CheckAnnotation[] = [];
+	let current: CheckAnnotation | undefined;
+	const finish = (): void => {
+		if (current !== undefined) annotations.push(current);
+		current = undefined;
+	};
+
+	for (const line of lines) {
+		const header = /^from (.+):$/u.exec(line);
+		if (header !== null) {
+			const file = header[1];
+			if (file === undefined) continue;
+			finish();
+			current = { file };
+		} else if (line === "--") finish();
+		else if (current !== undefined && current.line === undefined) {
+			const lineNumber = originalLine(line);
+			if (lineNumber !== undefined) current.line = lineNumber;
+		}
+	}
+	finish();
+	return annotations;
+};
+
+const exitCode = (error: unknown): number | string | undefined => {
+	if (typeof error !== "object" || error === null || !("code" in error)) return undefined;
+	return typeof error.code === "number" || typeof error.code === "string" ? error.code : undefined;
+};
 
 export const parseArgs = (input: string): string[] => {
 	const args: string[] = [];
@@ -60,7 +133,20 @@ export const checkFormatting = async (
 	binaryPath: string,
 	configPath: string,
 	additionalArgs: string,
-	execute: Execute = execFileAsync,
+	options: CheckOptions = {},
 ): Promise<void> => {
-	await execute(binaryPath, buildCheckArgs(configPath, additionalArgs));
+	const { annotations = true, annotate = annotateError, execute = execFileAsync } = options;
+	const args = buildCheckArgs(configPath, additionalArgs);
+	try {
+		writeOutput(asOutput(await execute(binaryPath, args, { maxBuffer: CHECK_MAX_BUFFER })));
+	} catch (error) {
+		const output = asOutput(error);
+		writeOutput(output);
+		if (annotations && Number(exitCode(error)) === DPRINT.checkFailureExitCode) {
+			for (const properties of parseCheckAnnotations(outputText(output.stdout), args.includes("--list-different"))) {
+				annotate(ANNOTATION_MESSAGE, { ...properties, title: ANNOTATION_TITLE });
+			}
+		}
+		throw error;
+	}
 };

@@ -1,4 +1,5 @@
 export const ACTION_INPUT = {
+	annotations: "annotations",
 	args: "args",
 	cache: "cache",
 	configPath: "config-path",
@@ -47,6 +48,7 @@ export const ENVIRONMENT = {
 
 export const DPRINT = {
 	binaryCacheVersion: 2,
+	checkFailureExitCode: 20,
 	checksumAsset: "SHASUMS256.txt",
 	command: {
 		check: "check",

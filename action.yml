@@ -24,6 +24,10 @@ inputs:
     description: "Specific dprint config path, glob, or remote HTTP(S) URL"
     required: false
     default: ""
+  annotations:
+    description: "Emit GitHub file annotations for formatting failures"
+    required: false
+    default: "true"
   args:
     description: "Additional arguments to pass to dprint check"
     required: false

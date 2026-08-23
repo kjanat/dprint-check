@@ -19,6 +19,7 @@ declare const action: Readonly<{
 		cache: ActionInput<"true">;
 		"install-only": ActionInput<"false">;
 		"config-path": ActionInput<"">;
+		annotations: ActionInput<"true">;
 		args: ActionInput<"">;
 	}>;
 	outputs: Readonly<{

@@ -32,6 +32,7 @@ describe("action metadata", () => {
 			[ACTION_INPUT.cache, ACTION_VALUE.true],
 			[ACTION_INPUT.installOnly, ACTION_VALUE.false],
 			[ACTION_INPUT.configPath, ""],
+			[ACTION_INPUT.annotations, ACTION_VALUE.true],
 			[ACTION_INPUT.args, ""],
 		] as const,
 	)("defaults %s to %s", (input, expected) => {

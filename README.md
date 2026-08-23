@@ -1,6 +1,8 @@
 # dprint check action
 
 This action installs dprint, caches the binary and compiled WASM plugins, then runs `dprint check`.
+Formatting failures are emitted as GitHub file annotations while retaining dprint's diff in the job log.
+Set `annotations` to `false` to retain only the job-log output.
 
 ## Usage
 
@@ -91,6 +93,7 @@ E.g. to only check changed files:
 | `cache`          | `true`          | Cache the binary and compiled WASM plugins    |
 | `install-only`   | `false`         | Install without running `dprint check`        |
 | `config-path`    | auto-discovered | Config path, glob, or remote HTTP(S) URL      |
+| `annotations`    | `true`          | Emit annotations for formatting failures      |
 | `args`           |                 | Additional arguments passed to `dprint check` |
 
 ## Outputs
