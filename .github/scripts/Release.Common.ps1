@@ -44,8 +44,7 @@ function Invoke-GitHubApi {
 		[switch] $Paginate
 	)
 
-	$apiVersion = Get-RequiredEnvironmentVariable 'GH_API_VERSION'
-	$arguments = @('api', '-H', "X-GitHub-Api-Version: $apiVersion")
+	$arguments = @('api')
 	if ($Paginate) {
 		$arguments += '--paginate', '--slurp'
 	}
@@ -323,7 +322,7 @@ function Update-FloatingTag {
 		return
 	}
 	$refPath = "repos/{owner}/{repo}/git/ref/tags/$Tag"
-	if (Test-NativeCommand { gh api -H "X-GitHub-Api-Version: $env:GH_API_VERSION" $refPath }) {
+	if (Test-NativeCommand { gh api $refPath }) {
 		$null = Invoke-GitHubApi -Method PATCH -Path "repos/{owner}/{repo}/git/refs/tags/$Tag" -Body @{
 			sha   = $Sha
 			force = $true

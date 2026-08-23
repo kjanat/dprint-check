@@ -23,9 +23,7 @@ jobs:
   build:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    outputs:
-      attestation-url: "${{ steps.attestation.outputs.attestation-url }}"
-      github-api-version: "${{ steps.github-api.outputs.version }}"
+    outputs: { attestation-url: "${{ steps.attestation.outputs.attestation-url }}" }
     permissions:
       artifact-metadata: write
       attestations: write
@@ -36,15 +34,8 @@ jobs:
         with: { ref: "${{ env.SOURCE_SHA }}" }
       - uses: &setup-bun-action oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
         with: { bun-version-file: package.json }
-      - name: Read GitHub API version
-        id: github-api
-        run: |
-          $version = bun -e 'import { GITHUB_API } from "./src/lib/github.ts"; process.stdout.write(GITHUB_API.version)'
-          "version=$version" >> $env:GITHUB_OUTPUT
       - name: Validate release request
-        env:
-          GH_API_VERSION: "${{ steps.github-api.outputs.version }}"
-          GH_TOKEN: "${{ github.token }}"
+        env: { GH_TOKEN: "${{ github.token }}" }
         run: ./.github/scripts/Test-ReleaseRequest.ps1
       - run: bun install --frozen-lockfile
       - run: bun run build
@@ -80,8 +71,7 @@ jobs:
         with: { name: "${{ env.CANDIDATE_ARTIFACT }}", path: candidate }
       - run: bun install --frozen-lockfile
       - name: Verify and independently rebuild release candidate
-        env:
-          GH_TOKEN: "${{ github.token }}"
+        env: { GH_TOKEN: "${{ github.token }}" }
         run: ./.github/scripts/Test-ReleaseCandidate.ps1
 
   draft:
@@ -98,7 +88,6 @@ jobs:
       - name: Create signed release commit and draft
         env:
           ATTESTATION_URL: "${{ needs.build.outputs.attestation-url }}"
-          GH_API_VERSION: "${{ needs.build.outputs.github-api-version }}"
           GH_TOKEN: "${{ github.token }}"
         run: ./.github/scripts/New-ReleaseDraft.ps1
 
@@ -128,13 +117,6 @@ jobs:
           ref: "${{ env.DEFAULT_BRANCH }}"
       - uses: *setup-bun-action
         with: { bun-version-file: automation/package.json }
-      - name: Read GitHub API version
-        id: github-api
-        run: |
-          $version = bun -e 'import { GITHUB_API } from "./automation/src/lib/github.ts"; process.stdout.write(GITHUB_API.version)'
-          "version=$version" >> $env:GITHUB_OUTPUT
       - name: Verify immutable release and move floating tags
-        env:
-          GH_API_VERSION: "${{ steps.github-api.outputs.version }}"
-          GH_TOKEN: "${{ github.token }}"
+        env: { GH_TOKEN: "${{ github.token }}" }
         run: ./automation/.github/scripts/Complete-Release.ps1

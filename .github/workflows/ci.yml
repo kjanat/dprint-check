@@ -114,8 +114,7 @@ jobs:
   cache-prime:
     needs: quality
     runs-on: ${{ matrix.os }}
-    strategy:
-      matrix: { os: [ubuntu-latest, macos-latest, windows-latest] }
+    strategy: { matrix: { os: [ubuntu-latest, macos-latest, windows-latest] } }
     steps:
       - name: Use LF line endings
         uses: $/actions/git-lf
