@@ -215,7 +215,10 @@ jobs:
             exit 1
           }
 
-          gh release create "${VERSION}" candidate/SHA256SUMS \
+          gh release create "${VERSION}" \
+            candidate/SHA256SUMS \
+            candidate/dist/main.mjs \
+            candidate/dist/post.mjs \
             --target "${release_sha}" \
             --title "${VERSION}" \
             --generate-notes \
@@ -229,16 +232,24 @@ jobs:
           [[ "${is_draft}" == "true" ]]
           [[ "${tag_name}" == "${VERSION}" ]]
           [[ "${target}" == "${release_sha}" ]]
-          echo "release-sha=${release_sha}" >> "${GITHUB_OUTPUT}"
+          {
+            echo "release-sha=${release_sha}"
+            echo "release-url=${release_url}"
+          } >> "${GITHUB_OUTPUT}"
           echo "Draft release: ${release_url}"
       - name: Summarize release gate
-        env: { RELEASE_SHA: "${{ steps.release.outputs.release-sha }}" }
+        env:
+          RELEASE_SHA: "${{ steps.release.outputs.release-sha }}"
+          RELEASE_URL: "${{ steps.release.outputs.release-url }}"
         run: |
           {
             echo "## ${VERSION} is ready for review"
             echo
-            echo "- Source commit: ${SOURCE_SHA}"
-            echo "- Signed release commit: ${RELEASE_SHA}"
+            echo "- Draft release: [Review ${VERSION}](${RELEASE_URL})"
+            echo "- Source commit: [${SOURCE_SHA:0:7}](${GITHUB_SERVER_URL}/${GH_REPO}/commit/${SOURCE_SHA})"
+            echo "- Signed release commit: [${RELEASE_SHA:0:7}](${GITHUB_SERVER_URL}/${GH_REPO}/commit/${RELEASE_SHA})"
+            echo "- Preparation run: [#${GITHUB_RUN_NUMBER}](${GITHUB_SERVER_URL}/${GH_REPO}/actions/runs/${GITHUB_RUN_ID})"
+            echo "- Release workflow: [Open dispatch page](${GITHUB_SERVER_URL}/${GH_REPO}/actions/workflows/release.yml)"
             echo "- Independent rebuild: byte-for-byte identical"
             echo "- Bundle provenance: attested"
             echo
@@ -339,16 +350,25 @@ jobs:
           cmp dist/main.mjs ../release/dist/main.mjs
           cmp dist/post.mjs ../release/dist/post.mjs
         working-directory: source
-      - name: Verify published checksum asset
+      - name: Verify published release assets
         env: { GH_TOKEN: "${{ github.token }}" }
         run: |
           set -euo pipefail
-          mkdir published
+          mkdir -p published/dist
           gh release download "${VERSION}" \
             --pattern SHA256SUMS \
             --dir published
-          gh release verify-asset "${VERSION}" published/SHA256SUMS
+          gh release download "${VERSION}" \
+            --pattern main.mjs \
+            --pattern post.mjs \
+            --dir published/dist
+          for file in published/SHA256SUMS published/dist/main.mjs published/dist/post.mjs; do
+            gh release verify-asset "${VERSION}" "${file}"
+          done
+          (cd published && sha256sum --check SHA256SUMS)
           cmp release/SHA256SUMS published/SHA256SUMS
+          cmp release/dist/main.mjs published/dist/main.mjs
+          cmp release/dist/post.mjs published/dist/post.mjs
       - name: Move floating release tags
         env:
           GH_API_VERSION: "${{ steps.github-api.outputs.version }}"

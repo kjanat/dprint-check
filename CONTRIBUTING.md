@@ -91,10 +91,11 @@ See GitHub's documentation for [immutable releases], [artifact attestations],
    dist/post.mjs
    ```
 
-5. Review the workflow summary and draft. Do not replace `SHA256SUMS` or change
-   the target commit. Confirm release immutability is enabled, then publish the
-   draft through GitHub's release UI. Publishing it automatically triggers the
-   final verification phase of the `Release` workflow.
+5. Review the workflow summary and draft. Confirm that `SHA256SUMS`, `main.mjs`,
+   and `post.mjs` are attached. Do not replace them or change the target commit.
+   Confirm release immutability is enabled, then publish the draft through
+   GitHub's release UI. Publishing it automatically triggers the final
+   verification phase of the `Release` workflow.
 6. Wait for the release-triggered verification job. It verifies the immutable
    release, signed single-parent release commit, changed paths, checksums,
    provenance, independent rebuild, and published checksum asset before moving
