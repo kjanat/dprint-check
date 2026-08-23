@@ -16,6 +16,11 @@ type Execute = (file: string, args: string[], options: {
 	maxBuffer: number;
 }) => Promise<unknown>;
 
+interface WarmupOptions {
+	debug?: boolean;
+	execute?: Execute;
+}
+
 const isTimeoutKill = (error: unknown): boolean => {
 	if (error === null || typeof error !== "object") return false;
 	const killed = "killed" in error && error.killed === true;
@@ -23,10 +28,17 @@ const isTimeoutKill = (error: unknown): boolean => {
 	return killed && signal;
 };
 
-const warmupConfig = async (binaryPath: string, configPath: string, execute: Execute): Promise<boolean> => {
+const warmupConfig = async (
+	binaryPath: string,
+	configPath: string,
+	debug: boolean,
+	execute: Execute,
+): Promise<boolean> => {
+	const args = [DPRINT.command.warmup, DPRINT.command.config, configPath];
+	if (debug) args.push(DPRINT.command.logLevel, DPRINT.logLevel.debug);
 	for (let attempt = 1; attempt <= WARMUP_ATTEMPTS; attempt++) {
 		try {
-			await execute(binaryPath, [DPRINT.command.warmup, DPRINT.command.config, configPath], {
+			await execute(binaryPath, args, {
 				timeout: WARMUP_TIMEOUT_MS,
 				cwd: isRemoteConfig(configPath) ? (env[ENVIRONMENT.githubWorkspace] ?? cwd()) : dirname(configPath),
 				maxBuffer: WARMUP_MAX_BUFFER,
@@ -47,10 +59,11 @@ const warmupConfig = async (binaryPath: string, configPath: string, execute: Exe
 export const warmupPlugins = async (
 	binaryPath: string,
 	configPaths: readonly string[],
-	execute: Execute = execFileAsync,
+	options: WarmupOptions = {},
 ): Promise<boolean> => {
+	const { debug = false, execute = execFileAsync } = options;
 	for (const configPath of configPaths) {
-		if (!await warmupConfig(binaryPath, configPath, execute)) return false;
+		if (!await warmupConfig(binaryPath, configPath, debug, execute)) return false;
 	}
 	return true;
 };

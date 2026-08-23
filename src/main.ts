@@ -8,6 +8,7 @@ import {
 	exportVariable,
 	getInput,
 	info,
+	isDebug,
 	saveState,
 	setFailed,
 	setOutput,
@@ -38,6 +39,7 @@ const restorePluginCache = async (
 	binaryPath: string,
 	config: ConfigGraph | undefined,
 	configRoots: readonly string[],
+	debugEnabled: boolean,
 ): Promise<void> => {
 	debug(`Discovered ${configRoots.length} dprint config root(s)`);
 	if (config === undefined) {
@@ -74,7 +76,9 @@ const restorePluginCache = async (
 		await rm(join(cacheDir, DPRINT.remoteCacheDirectory), { recursive: true, force: true });
 		debug("Cleared restored remote files before plugin warmup");
 	}
-	if (await warmupPlugins(binaryPath, config.roots)) saveState(ACTION_STATE.pluginCacheReady, ACTION_VALUE.true);
+	if (await warmupPlugins(binaryPath, config.roots, { debug: debugEnabled })) {
+		saveState(ACTION_STATE.pluginCacheReady, ACTION_VALUE.true);
+	}
 };
 
 const run = async (): Promise<void> => {
@@ -88,6 +92,7 @@ const run = async (): Promise<void> => {
 		const cacheEnabled = getInput(ACTION_INPUT.cache) !== ACTION_VALUE.false;
 		const installOnly = getInput(ACTION_INPUT.installOnly) === ACTION_VALUE.true;
 		const annotationsEnabled = getInput(ACTION_INPUT.annotations) !== ACTION_VALUE.false;
+		const debugEnabled = isDebug();
 		const cacheDir = pluginCacheDir();
 		debug(
 			`Inputs: ${ACTION_INPUT.dprintVersion}=${versionInput}; ${ACTION_INPUT.token}=${
@@ -121,7 +126,15 @@ const run = async (): Promise<void> => {
 		}
 
 		if (cacheAvailable) {
-			await restorePluginCache(cacheDir, version, platformKey, location, config, preparedConfig?.roots ?? []);
+			await restorePluginCache(
+				cacheDir,
+				version,
+				platformKey,
+				location,
+				config,
+				preparedConfig?.roots ?? [],
+				debugEnabled,
+			);
 		} else if (cacheEnabled) warning("GitHub Actions cache is unavailable; skipping plugin cache");
 
 		if (!installOnly) {
@@ -129,7 +142,10 @@ const run = async (): Promise<void> => {
 			const checkRoots = configPathInput === "" && preparedConfig?.materialized !== true
 				? [""]
 				: (preparedConfig?.roots ?? []);
-			await checkConfigurations(location, checkRoots, additionalArgs, { annotations: annotationsEnabled });
+			await checkConfigurations(location, checkRoots, additionalArgs, {
+				annotations: annotationsEnabled,
+				debug: debugEnabled,
+			});
 		} else info("dprint installed; check skipped because install-only is true");
 	} catch (error) {
 		if (isFormattingFailure(error)) process.exitCode = 1;

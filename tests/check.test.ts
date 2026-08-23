@@ -73,6 +73,7 @@ describe("parseCheckAnnotations", () => {
 		const output = [
 			"\u001B[31mfrom\u001B[0m src/first.ts:",
 			"  12|-old text",
+			"  13|-more old text",
 			"12  |+new text",
 			"--",
 			"from src/line-endings.ts:",
@@ -84,7 +85,7 @@ describe("parseCheckAnnotations", () => {
 		].join("\n");
 
 		expect(parseCheckAnnotations(output, false)).toEqual([
-			{ file: "src/first.ts", line: 12 },
+			{ file: "src/first.ts", line: 12, endLine: 13 },
 			{ file: "src/line-endings.ts" },
 			{ file: "D:\\code\\windows.ts", line: 15 },
 		]);
@@ -142,7 +143,7 @@ test("checks every explicit configuration", async () => {
 test("annotates formatting failures and preserves the rejected error", async () => {
 	const failure = Object.assign(new Error("dprint check failed"), {
 		code: 20,
-		stdout: "from src/example.ts:\n  7|-old\n7  |+new\n--\n",
+		stdout: "from src/example.ts:\n  7|-old\n  8|-more old\n7  |+new\n--\n",
 		stderr: "Found 1 not formatted file. Run dprint fmt to fix.\n",
 	});
 	const listFailure = Object.assign(new Error("dprint check failed"), {
@@ -162,6 +163,7 @@ test("annotates formatting failures and preserves the rejected error", async () 
 		], { maxBuffer: 64 * 1024 * 1024 });
 		expect(annotate).toHaveBeenCalledTimes(2);
 		expect(annotate).toHaveBeenNthCalledWith(1, "File is not formatted. Run dprint fmt to fix.", {
+			endLine: 8,
 			file: "src/example.ts",
 			line: 7,
 			title: "dprint check",

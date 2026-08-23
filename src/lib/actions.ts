@@ -11,6 +11,7 @@ interface InputOptions {
 }
 
 interface AnnotationProperties {
+	endLine?: number;
 	file?: string;
 	line?: number;
 	title?: string;
@@ -45,6 +46,8 @@ export const getInput = (name: string, options: InputOptions = {}): string => {
 export const setSecret = (secret: string): void => command("add-mask", secret);
 
 export const debug = (message: string): void => command("debug", message);
+
+export const isDebug = (): boolean => env[ENVIRONMENT.runnerDebug] === "1";
 
 export const info = (message: string): void => void process.stdout.write(`${message}${EOL}`);
 

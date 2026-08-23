@@ -93,7 +93,7 @@ test("emits escaped workflow commands when file commands are unavailable", () =>
 		debug("detail");
 		info("plain");
 		warning("careful");
-		error("bad line\n", { file: "src/a:b,c%.ts", line: 12, title: "dprint: check" });
+		error("bad line\n", { file: "src/a:b,c%.ts", line: 12, endLine: 14, title: "dprint: check" });
 		setOutput("result:,", "line one\nline two");
 		saveState("cache-key", "state");
 		exportVariable(ENVIRONMENT.dprintCacheDirectory, "/cache");
@@ -104,7 +104,7 @@ test("emits escaped workflow commands when file commands are unavailable", () =>
 			"::debug::detail\n",
 			"plain\n",
 			"::warning::careful\n",
-			"::error file=src/a%3Ab%2Cc%25.ts,line=12,title=dprint%3A check::bad line%0A\n",
+			"::error file=src/a%3Ab%2Cc%25.ts,line=12,endLine=14,title=dprint%3A check::bad line%0A\n",
 			"::set-output name=result%3A%2C::line one%0Aline two\n",
 			"::save-state name=cache-key::state\n",
 			`::set-env name=${ENVIRONMENT.dprintCacheDirectory}::/cache\n`,
