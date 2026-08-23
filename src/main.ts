@@ -22,7 +22,7 @@ import { describeError } from "#lib/error";
 import { installDprint } from "#lib/install";
 import { warmupPlugins } from "#lib/warmup";
 
-const pluginCacheDir = (): string => env[ENVIRONMENT.dprintCacheDirectory] ?? join(homedir(), ".cache", DPRINT.name);
+const pluginCacheDir = (): string =>                                                                                       env[ENVIRONMENT.dprintCacheDirectory] ?? join(homedir(), ".cache", DPRINT.name);
 
 const restorePluginCache = async (
 	cacheDir: string,
