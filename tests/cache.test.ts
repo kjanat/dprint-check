@@ -1,15 +1,11 @@
-import { afterEach, describe, expect, mock, test } from "bun:test";
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { describe, expect, mock, test } from "bun:test";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { cacheVersion, isCacheAvailable, restoreCache, saveCache } from "#lib/cache";
+import { useTestContext } from "#test/helpers";
 
-const temporaryDirectories: string[] = [];
-
-afterEach(async () => {
-	await Promise.all(temporaryDirectories.splice(0).map(path => rm(path, { recursive: true, force: true })));
-});
+const context = useTestContext();
 
 describe("cache availability", () => {
 	test.each(
@@ -50,8 +46,7 @@ describe("cache availability", () => {
 });
 
 test("saves and restores an exact directory through the v2 protocol", async () => {
-	const root = await mkdtemp(join(tmpdir(), "dprint-cache-test-"));
-	temporaryDirectories.push(root);
+	const root = await context.temporaryDirectory("dprint-cache-test-");
 	const workspace = join(root, "workspace");
 	const cachePath = join(root, "cache");
 	await mkdir(workspace);
@@ -136,9 +131,9 @@ test("honors cache-mode before executing or requesting anything", async () => {
 	expect(fetch).not.toHaveBeenCalled();
 });
 
-test("retries transient cache-service failures", () => {
+test.each([408, 429, 503])("retries transient HTTP %i cache-service failures", status => {
 	const fetch = mock()
-		.mockResolvedValueOnce(Response.json({ msg: "temporary failure" }, { status: 503 }))
+		.mockResolvedValueOnce(Response.json({ msg: "temporary failure" }, { status }))
 		.mockResolvedValueOnce(Response.json({ ok: false }));
 	const execute = mock(async () => {});
 	const sleep = mock(async () => {});

@@ -16,20 +16,19 @@ import {
 import { isCacheAvailable, restoreCache } from "#lib/cache";
 import { checkFormatting } from "#lib/check";
 import { computeCacheKey, findConfigFiles } from "#lib/config";
+import { describeError } from "#lib/error";
 import { installDprint } from "#lib/install";
 import { warmupPlugins } from "#lib/warmup";
 
-function pluginCacheDir(): string {
-	return env["DPRINT_CACHE_DIR"] ?? join(homedir(), ".cache", "dprint");
-}
+const pluginCacheDir = (): string => env["DPRINT_CACHE_DIR"] ?? join(homedir(), ".cache", "dprint");
 
-async function restorePluginCache(
+const restorePluginCache = async (
 	cacheDir: string,
 	version: string,
 	platformKey: string,
 	binaryPath: string,
 	configPathInput: string,
-): Promise<void> {
+): Promise<void> => {
 	const configPaths = await findConfigFiles(configPathInput || undefined);
 	debug(`Discovered ${configPaths.length} dprint config file(s)`);
 	if (configPaths.length === 0) {
@@ -49,7 +48,7 @@ async function restorePluginCache(
 	try {
 		hitKey = await restoreCache([cacheDir], primaryKey, restoreKeys);
 	} catch (error) {
-		warning(`Failed to restore dprint plugin cache: ${describe(error)}`);
+		warning(`Failed to restore dprint plugin cache: ${describeError(error)}`);
 	}
 
 	const exactHit = hitKey === primaryKey;
@@ -63,9 +62,9 @@ async function restorePluginCache(
 	}
 
 	if (await warmupPlugins(binaryPath, configPaths)) saveState("PLUGIN_CACHE_READY", "true");
-}
+};
 
-async function run(): Promise<void> {
+const run = async (): Promise<void> => {
 	try {
 		const versionInput = getInput("dprint-version") || "latest";
 		const token = getInput("token");
@@ -97,12 +96,8 @@ async function run(): Promise<void> {
 			await checkFormatting(location, configPathInput, additionalArgs);
 		} else info("dprint installed; check skipped because run-check is false");
 	} catch (error) {
-		setFailed(describe(error));
+		setFailed(describeError(error));
 	}
-}
-
-function describe(error: unknown): string {
-	return error instanceof Error ? error.message : String(error);
-}
+};
 
 void run();

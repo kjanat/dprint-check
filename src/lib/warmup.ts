@@ -1,6 +1,7 @@
 import { dirname } from "node:path";
 
 import { info, warning } from "#lib/actions";
+import { describeError } from "#lib/error";
 import { execFileAsync } from "#lib/exec";
 
 const ATTEMPTS = 3;
@@ -11,14 +12,14 @@ type Execute = (file: string, args: string[], options: {
 	maxBuffer: number;
 }) => Promise<unknown>;
 
-function isTimeoutKill(error: unknown): boolean {
+const isTimeoutKill = (error: unknown): boolean => {
 	if (error === null || typeof error !== "object") return false;
 	const killed = "killed" in error && error.killed === true;
 	const signal = "signal" in error && (error.signal === "SIGTERM" || error.signal === "SIGKILL");
 	return killed && signal;
-}
+};
 
-async function warmupConfig(binaryPath: string, configPath: string, execute: Execute): Promise<boolean> {
+const warmupConfig = async (binaryPath: string, configPath: string, execute: Execute): Promise<boolean> => {
 	for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
 		try {
 			await execute(binaryPath, ["output-file-paths", "--config", configPath], {
@@ -30,26 +31,22 @@ async function warmupConfig(binaryPath: string, configPath: string, execute: Exe
 			return true;
 		} catch (error) {
 			if (!isTimeoutKill(error)) {
-				warning(`Plugin warmup failed: ${describe(error)}`);
+				warning(`Plugin warmup failed: ${describeError(error)}`);
 				return false;
 			}
 			info(`Plugin warmup hung (>${TIMEOUT_MS / 1000}s), attempt ${attempt}/${ATTEMPTS}`);
 		}
 	}
 	throw new Error(`Plugin warmup kept hanging after ${ATTEMPTS} attempts`);
-}
+};
 
-export async function warmupPlugins(
+export const warmupPlugins = async (
 	binaryPath: string,
 	configPaths: readonly string[],
 	execute: Execute = execFileAsync,
-): Promise<boolean> {
+): Promise<boolean> => {
 	for (const configPath of configPaths) {
 		if (!await warmupConfig(binaryPath, configPath, execute)) return false;
 	}
 	return true;
-}
-
-function describe(error: unknown): string {
-	return error instanceof Error ? error.message : String(error);
-}
+};

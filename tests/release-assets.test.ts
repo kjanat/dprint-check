@@ -2,9 +2,9 @@ import { expect, test } from "bun:test";
 
 import { resolveRuntimePlatform, selectReleaseAsset } from "#lib/platform";
 import type { ReleaseAsset } from "#lib/version";
-import releaseHistory from "./fixtures/release-assets.json" with { type: "json" };
+import releaseHistory from "#test/fixtures/release-assets.json" with { type: "json" };
 
-async function targetForAsset(assetName: string) {
+const targetForAsset = async (assetName: string) => {
 	const match = /^dprint-(?<architecture>x86_64|aarch64|riscv64gc|loongarch64|powerpc64le)-(?<platform>.+)\.zip$/u.exec(
 		assetName,
 	);
@@ -30,7 +30,7 @@ async function targetForAsset(assetName: string) {
 		return await resolveRuntimePlatform({ os: "linux", cpu, libc: "musl", byteOrder });
 	}
 	return undefined;
-}
+};
 
 test("selects every historical dprint release ZIP", async () => {
 	const failures: string[] = [];

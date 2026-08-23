@@ -14,73 +14,90 @@ var __commonJSMin = (cb, mod) => () => (mod || (cb((mod = { exports: {} }).expor
 var __require = /* #__PURE__ */ (() => createRequire(import.meta.url))();
 //#endregion
 //#region src/lib/actions.ts
-function escapeData(value) {
-	return value.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
-}
-function escapeProperty(value) {
-	return escapeData(value).replaceAll(":", "%3A").replaceAll(",", "%2C");
-}
-function command(name, value, properties = {}) {
+const escapeData = (value) => value.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
+const escapeProperty = (value) => escapeData(value).replaceAll(":", "%3A").replaceAll(",", "%2C");
+const command = (name, value, properties = {}) => {
 	const serialized = Object.entries(properties).map(([key, property]) => `${key}=${escapeProperty(property)}`).join(",");
 	process.stdout.write(`::${name}${serialized === "" ? "" : ` ${serialized}`}::${escapeData(value)}${EOL}`);
-}
-function fileCommand(variable, name, value) {
+};
+const fileCommand = (variable, name, value) => {
 	const path = env[variable];
 	if (path === void 0 || path === "") return false;
 	const marker = `dprint_${randomUUID()}`;
 	if (value.includes(marker)) throw new Error(`Unable to write ${name}: value contains generated delimiter`);
 	appendFileSync(path, `${name}<<${marker}${EOL}${value}${EOL}${marker}${EOL}`, { encoding: "utf8" });
 	return true;
-}
-function getInput(name, options = {}) {
+};
+const getInput = (name, options = {}) => {
 	const value = env[`INPUT_${name.replaceAll(" ", "_").toUpperCase()}`] ?? "";
 	return options.trimWhitespace === false ? value : value.trim();
-}
-function setSecret(secret) {
-	command("add-mask", secret);
-}
-function debug(message) {
-	command("debug", message);
-}
-function info(message) {
-	process.stdout.write(`${message}${EOL}`);
-}
-function warning(message) {
-	command("warning", message);
-}
-function setFailed(message) {
+};
+const setSecret = (secret) => command("add-mask", secret);
+const debug = (message) => command("debug", message);
+const info = (message) => void process.stdout.write(`${message}${EOL}`);
+const warning = (message) => command("warning", message);
+const setFailed = (message) => {
 	process.exitCode = 1;
 	command("error", message);
-}
-function setOutput(name, value) {
+};
+const setOutput = (name, value) => {
 	const serialized = String(value);
 	if (!fileCommand("GITHUB_OUTPUT", name, serialized)) command("set-output", serialized, { name });
-}
-function saveState(name, value) {
+};
+const saveState = (name, value) => {
 	if (!fileCommand("GITHUB_STATE", name, value)) command("save-state", value, { name });
-}
-function exportVariable(name, value) {
+};
+const exportVariable = (name, value) => {
 	env[name] = value;
 	if (!fileCommand("GITHUB_ENV", name, value)) command("set-env", value, { name });
-}
-function addPath(path) {
+};
+const addPath = (path) => {
 	env["PATH"] = `${path}${delimiter}${env["PATH"] ?? ""}`;
 	const file = env["GITHUB_PATH"];
 	if (file !== void 0 && file !== "") appendFileSync(file, `${path}${EOL}`, { encoding: "utf8" });
 	else command("add-path", path);
-}
+};
 //#endregion
 //#region src/lib/exec.ts
 const execFileAsync = promisify(execFile);
 //#endregion
+//#region src/lib/http.ts
+const isRetryableStatus = (status) => status === 408 || status === 429 || status >= 500;
+const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+const requestWithRetry = async (input, init, options = {}) => {
+	const attempts = options.attempts ?? 3;
+	const fetch = options.fetch ?? globalThis.fetch;
+	let lastError;
+	let lastResponse;
+	for (let attempt = 1; attempt <= attempts; attempt++) {
+		try {
+			const response = await fetch(input, init);
+			if (response.ok || !isRetryableStatus(response.status)) return response;
+			lastResponse = response;
+			lastError = /* @__PURE__ */ new Error(`HTTP ${response.status}`);
+		} catch (error) {
+			lastError = error;
+		}
+		if (attempt < attempts) {
+			options.onRetry?.(attempt, attempts);
+			await (options.sleep ?? sleep)(attempt * 1e3);
+		}
+	}
+	if (lastResponse !== void 0) return lastResponse;
+	throw lastError instanceof Error ? lastError : new Error(String(lastError));
+};
+//#endregion
+//#region src/lib/temp.ts
+const createTemporaryDirectory = async (root, prefix) => {
+	await mkdir(root, { recursive: true });
+	return mkdtemp(join(root, prefix));
+};
+//#endregion
 //#region src/lib/cache.ts
 const SERVICE = "github.actions.results.api.v1.CacheService";
 const VERSION_SALT = "1.0";
-const RETRY_ATTEMPTS = 3;
-function environment(options) {
-	return options.environment ?? env;
-}
-function cacheModeAllows(mode, operation) {
+const environment = (options) => options.environment ?? env;
+const cacheModeAllows = (mode, operation) => {
 	const normalized = mode?.trim().toLowerCase();
 	if (normalized === void 0 || ![
 		"none",
@@ -89,20 +106,20 @@ function cacheModeAllows(mode, operation) {
 		"write-only"
 	].includes(normalized)) return true;
 	return operation === "read" ? normalized === "read" || normalized === "write" : normalized === "write" || normalized === "write-only";
-}
-function isCacheAvailable(environment = env) {
+};
+const isCacheAvailable = (environment = env) => {
 	const server = new URL(environment["GITHUB_SERVER_URL"] ?? "https://github.com").hostname.toUpperCase();
 	return (server === "GITHUB.COM" || server.endsWith(".GHE.COM") || server.endsWith(".LOCALHOST")) && environment["ACTIONS_RESULTS_URL"] !== void 0 && environment["ACTIONS_RUNTIME_TOKEN"] !== void 0;
-}
-function validateKeys(primaryKey, restoreKeys = []) {
+};
+const validateKeys = (primaryKey, restoreKeys = []) => {
 	const keys = [primaryKey, ...restoreKeys];
 	if (keys.length > 10) throw new Error("Cache keys are limited to a maximum of 10");
 	for (const key of keys) {
 		if (key.length > 512) throw new Error(`Cache key cannot exceed 512 characters: ${key}`);
 		if (key.includes(",")) throw new Error(`Cache key cannot contain commas: ${key}`);
 	}
-}
-async function compression(execute) {
+};
+const compression = async (execute) => {
 	if (process.platform === "win32") return "gzip";
 	try {
 		await execute("zstd", ["--quiet", "--version"]);
@@ -110,34 +127,24 @@ async function compression(execute) {
 	} catch {
 		return "gzip";
 	}
-}
-function cacheVersion(paths, method) {
-	return createHash("sha256").update([
-		...paths,
-		method,
-		VERSION_SALT
-	].join("|")).digest("hex");
-}
-function workspace(environment) {
-	return environment["GITHUB_WORKSPACE"] ?? process.cwd();
-}
-async function tempDirectory(environment) {
-	const root = environment["RUNNER_TEMP"] ?? tmpdir();
-	await mkdir(root, { recursive: true });
-	return await mkdtemp(join(root, "dprint-cache-"));
-}
-function archiveName(method) {
-	return method === "gzip" ? "cache.tgz" : "cache.tzst";
-}
-function tarCompression(method, extract) {
+};
+const cacheVersion = (paths, method) => createHash("sha256").update([
+	...paths,
+	method,
+	VERSION_SALT
+].join("|")).digest("hex");
+const workspace = (environment) => environment["GITHUB_WORKSPACE"] ?? process.cwd();
+const tempDirectory = (environment) => createTemporaryDirectory(environment["RUNNER_TEMP"] ?? tmpdir(), "dprint-cache-");
+const archiveName = (method) => method === "gzip" ? "cache.tgz" : "cache.tzst";
+const tarCompression = (method, extract) => {
 	if (method === "gzip") return [extract ? "-xzf" : "-czf"];
 	return [
 		extract ? "-xf" : "-cf",
 		"--use-compress-program",
 		extract ? "unzstd" : "zstdmt"
 	];
-}
-async function extractArchive(archive, method, options) {
+};
+const extractArchive = async (archive, method, options) => {
 	await mkdir(workspace(environment(options)), { recursive: true });
 	const [operation, ...compressionArgs] = tarCompression(method, true);
 	await (options.execute ?? execFileAsync)("tar", [
@@ -148,37 +155,19 @@ async function extractArchive(archive, method, options) {
 		"-C",
 		workspace(environment(options))
 	]);
-}
-async function sleep(milliseconds) {
-	await new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-async function request(input, init, options) {
-	const fetch = options.fetch ?? globalThis.fetch;
-	let lastError;
-	let lastResponse;
-	for (let attempt = 1; attempt <= RETRY_ATTEMPTS; attempt++) {
-		try {
-			const response = await fetch(input, init);
-			if (response.ok || response.status < 500 && response.status !== 429) return response;
-			lastResponse = response;
-			lastError = /* @__PURE__ */ new Error(`HTTP ${response.status}`);
-		} catch (error) {
-			lastError = error;
-		}
-		if (attempt < RETRY_ATTEMPTS) {
-			(options.debug ?? debug)(`Cache request attempt ${attempt}/${RETRY_ATTEMPTS} failed; retrying`);
-			await (options.sleep ?? sleep)(attempt * 1e3);
-		}
-	}
-	if (lastResponse !== void 0) return lastResponse;
-	throw lastError instanceof Error ? lastError : new Error(String(lastError));
-}
-async function twirp(method, body, options) {
+};
+const request = (input, init, options) => requestWithRetry(input, init, {
+	fetch: options.fetch,
+	sleep: options.sleep,
+	onRetry: (attempt, attempts) => (options.debug ?? debug)(`Cache request attempt ${attempt}/${attempts} failed; retrying`)
+});
+const twirp = async (method, body, options) => {
 	const runtime = environment(options);
 	const baseUrl = runtime["ACTIONS_RESULTS_URL"];
 	const token = runtime["ACTIONS_RUNTIME_TOKEN"];
 	if (baseUrl === void 0 || token === void 0) throw new Error("GitHub Actions cache service is unavailable");
-	const response = await request(new URL(`/twirp/${SERVICE}/${method}`, baseUrl), {
+	const url = new URL(`/twirp/${SERVICE}/${method}`, baseUrl);
+	const response = await request(url, {
 		method: "POST",
 		headers: {
 			accept: "application/json",
@@ -190,17 +179,18 @@ async function twirp(method, body, options) {
 	const result = await response.json();
 	if (!response.ok) throw new Error(result.msg ?? `Cache service returned HTTP ${response.status}`);
 	return result;
-}
-async function download(url, destination, options) {
+};
+const download = async (url, destination, options) => {
 	(options.maskSecret ?? setSecret)(url);
 	const response = await request(url, void 0, options);
 	if (!response.ok || response.body === null) throw new Error(`Cache download failed with HTTP ${response.status}`);
 	await pipeline(Readable.fromWeb(response.body), createWriteStream(destination));
-}
-async function restoreCache(paths, primaryKey, restoreKeys = [], options = {}) {
+};
+const restoreCache = async (paths, primaryKey, restoreKeys = [], options = {}) => {
 	validateKeys(primaryKey, restoreKeys);
 	if (!cacheModeAllows(environment(options)["ACTIONS_CACHE_MODE"], "read")) return void 0;
-	const method = await compression(options.execute ?? execFileAsync);
+	const execute = options.execute ?? execFileAsync;
+	const method = await compression(execute);
 	const response = await twirp("GetCacheEntryDownloadURL", {
 		key: primaryKey,
 		restore_keys: restoreKeys,
@@ -223,10 +213,10 @@ async function restoreCache(paths, primaryKey, restoreKeys = [], options = {}) {
 			force: true
 		});
 	}
-}
+};
 //#endregion
 //#region src/lib/check.ts
-function parseArgs(input) {
+const parseArgs = (input) => {
 	const args = [];
 	let current = "";
 	let quote;
@@ -268,16 +258,16 @@ function parseArgs(input) {
 	if (quote !== void 0) throw new Error("Unterminated quote in args input");
 	if (started) args.push(current);
 	return args;
-}
-function buildCheckArgs(configPath, additionalArgs) {
+};
+const buildCheckArgs = (configPath, additionalArgs) => {
 	const args = ["check"];
 	if (configPath !== "") args.push("--config", configPath);
 	if (additionalArgs.trim() !== "") args.push(...parseArgs(additionalArgs));
 	return args;
-}
-async function checkFormatting(binaryPath, configPath, additionalArgs, execute = execFileAsync) {
+};
+const checkFormatting = async (binaryPath, configPath, additionalArgs, execute = execFileAsync) => {
 	await execute(binaryPath, buildCheckArgs(configPath, additionalArgs));
-}
+};
 //#endregion
 //#region src/lib/config.ts
 const CONFIG_NAMES = [
@@ -287,7 +277,7 @@ const CONFIG_NAMES = [
 	".dprint.jsonc"
 ];
 const workspacePath = () => env["GITHUB_WORKSPACE"] ?? cwd();
-async function findConfigFiles(customPath) {
+const findConfigFiles = async (customPath) => {
 	const workspace = workspacePath();
 	if (customPath !== void 0 && customPath.trim() !== "") {
 		const pattern = isAbsolute(customPath) ? customPath : join(workspace, customPath);
@@ -299,8 +289,8 @@ async function findConfigFiles(customPath) {
 		if (matches.includes(rootCandidate)) return [rootCandidate, ...matches.filter((match) => match !== rootCandidate)];
 	}
 	return matches;
-}
-function computeCacheKey(configPaths, dprintVersion, platformKey) {
+};
+const computeCacheKey = (configPaths, dprintVersion, platformKey) => {
 	const workspace = workspacePath();
 	const hash = createHash("sha256");
 	for (const configPath of [...configPaths].sort()) {
@@ -317,28 +307,24 @@ function computeCacheKey(configPaths, dprintVersion, platformKey) {
 		primaryKey: `${prefix}-${digest}`,
 		restoreKeys: [`${prefix}-`, `${platformPrefix}-`]
 	};
-}
+};
+//#endregion
+//#region src/lib/error.ts
+const describeError = (error) => error instanceof Error ? error.message : String(error);
 //#endregion
 //#region src/lib/tool.ts
-const DOWNLOAD_ATTEMPTS = 3;
-function temporaryRoot() {
-	return env["RUNNER_TEMP"] ?? tmpdir();
-}
-async function temporaryDirectory(prefix) {
-	const root = temporaryRoot();
-	await mkdir(root, { recursive: true });
-	return await mkdtemp(join(root, prefix));
-}
-function toolPath(tool, version, architecture) {
+const temporaryRoot = () => env["RUNNER_TEMP"] ?? tmpdir();
+const temporaryDirectory = (prefix) => createTemporaryDirectory(temporaryRoot(), prefix);
+const toolPath = (tool, version, architecture) => {
 	const root = env["RUNNER_TOOL_CACHE"];
 	return root === void 0 || root === "" ? void 0 : join(root, tool, version, architecture);
-}
-function findTool(tool, version, architecture) {
+};
+const findTool = (tool, version, architecture) => {
 	const path = toolPath(tool, version, architecture);
 	if (path !== void 0 && existsSync(path) && existsSync(`${path}.complete`)) return path;
 	return "";
-}
-async function cacheToolDirectory(sourceDirectory, tool, version, architecture) {
+};
+const cacheToolDirectory = async (sourceDirectory, tool, version, architecture) => {
 	const destination = toolPath(tool, version, architecture);
 	if (destination === void 0) {
 		debug("RUNNER_TOOL_CACHE is unavailable; skipping tool-cache storage");
@@ -353,45 +339,26 @@ async function cacheToolDirectory(sourceDirectory, tool, version, architecture) 
 	for (const entry of await readdir(sourceDirectory)) await cp(join(sourceDirectory, entry), join(destination, entry), { recursive: true });
 	await writeFile(`${destination}.complete`, "");
 	return destination;
-}
-function retryableStatus(status) {
-	return status === 408 || status === 429 || status >= 500;
-}
-async function downloadTool(url, options = {}) {
-	const fetch = options.fetch ?? globalThis.fetch;
-	const sleep = options.sleep ?? ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
+};
+const downloadTool = async (url, options = {}) => {
 	const directory = await temporaryDirectory("dprint-download-");
 	const destination = join(directory, "download");
-	let lastError;
-	for (let attempt = 1; attempt <= DOWNLOAD_ATTEMPTS; attempt++) {
-		let response;
-		try {
-			response = await fetch(url);
-		} catch (error) {
-			lastError = error;
-			if (attempt < DOWNLOAD_ATTEMPTS) await sleep(attempt * 1e3);
-			continue;
-		}
-		if (!response.ok || response.body === null) {
-			lastError = /* @__PURE__ */ new Error(`Download failed with HTTP ${response.status}`);
-			if (!retryableStatus(response.status)) break;
-			if (attempt < DOWNLOAD_ATTEMPTS) await sleep(attempt * 1e3);
-			continue;
-		}
+	try {
+		const response = await requestWithRetry(url, void 0, options);
+		if (!response.ok || response.body === null) throw new Error(`Download failed with HTTP ${response.status}`);
 		await mkdir(dirname(destination), { recursive: true });
 		await pipeline(Readable.fromWeb(response.body), createWriteStream(destination));
 		return destination;
+	} catch (error) {
+		await rm(directory, {
+			recursive: true,
+			force: true
+		});
+		throw error;
 	}
-	await rm(directory, {
-		recursive: true,
-		force: true
-	});
-	throw lastError instanceof Error ? lastError : new Error(String(lastError));
-}
-function powershellLiteral(value) {
-	return `'${value.replaceAll("'", "''").replace(/["\r\n]/gu, "")}'`;
-}
-async function extractZip(archive) {
+};
+const powershellLiteral = (value) => `'${value.replaceAll("'", "''").replace(/["\r\n]/gu, "")}'`;
+const extractZip = async (archive) => {
 	const destination = await temporaryDirectory("dprint-extract-");
 	if (process.platform === "win32") {
 		const command = `Expand-Archive -LiteralPath ${powershellLiteral(archive)} -DestinationPath ${powershellLiteral(destination)} -Force`;
@@ -421,19 +388,19 @@ async function extractZip(archive) {
 		destination
 	]);
 	return destination;
-}
+};
 //#endregion
 //#region src/lib/checksum.ts
-function digestFromAsset(asset) {
+const digestFromAsset = (asset) => {
 	return (asset.digest?.match(/^sha256:([0-9a-f]{64})$/iu))?.[1]?.toLowerCase();
-}
-function checksumFromManifest(manifest, assetName) {
+};
+const checksumFromManifest = (manifest, assetName) => {
 	for (const line of manifest.split(/\r?\n/u)) {
 		const match = line.match(/^([0-9a-f]{64})\s+\*?(.+)$/iu);
 		if (match?.[2] === assetName) return match[1]?.toLowerCase();
 	}
-}
-async function resolveReleaseAssetChecksum(releaseTag, asset, assets, download = downloadTool) {
+};
+const resolveReleaseAssetChecksum = async (releaseTag, asset, assets, download = downloadTool) => {
 	const digest = digestFromAsset(asset);
 	if (digest !== void 0) return digest;
 	const manifestAsset = assets.find((candidate) => candidate.name === "SHASUMS256.txt");
@@ -442,16 +409,16 @@ async function resolveReleaseAssetChecksum(releaseTag, asset, assets, download =
 	const checksum = checksumFromManifest(await readFile(manifestPath, "utf8"), asset.name);
 	if (checksum === void 0) throw new Error(`dprint ${releaseTag} cannot be securely installed: SHASUMS256.txt has no checksum for ${asset.name}`);
 	return checksum;
-}
-async function sha256(path) {
+};
+const sha256 = async (path) => {
 	const hash = createHash("sha256");
 	for await (const chunk of createReadStream(path)) hash.update(chunk);
 	return hash.digest("hex");
-}
-async function verifyReleaseAsset(archivePath, asset, expectedChecksum) {
+};
+const verifyReleaseAsset = async (archivePath, asset, expectedChecksum) => {
 	const actual = await sha256(archivePath);
 	if (actual !== expectedChecksum) throw new Error(`SHA-256 mismatch for ${asset.name}: expected ${expectedChecksum}, got ${actual}`);
-}
+};
 //#endregion
 //#region node_modules/detect-libc/lib/process.js
 var require_process = /* @__PURE__ */ __commonJSMin(((exports, module) => {
@@ -775,22 +742,22 @@ var import_detect_libc = (/* @__PURE__ */ __commonJSMin(((exports, module) => {
 		versionSync
 	};
 })))();
-function architectureNames(cpu, byteOrder) {
+const architectureNames = (cpu, byteOrder) => {
 	if (cpu === "x64") return ["x86_64"];
 	if (cpu === "arm64") return ["aarch64"];
 	if (cpu === "riscv64") return ["riscv64gc", "riscv64"];
 	if (cpu === "loong64") return ["loongarch64", "loong64"];
 	if (cpu === "ppc64" && byteOrder === "LE") return ["powerpc64le"];
 	return [cpu];
-}
-function platformNames(os, libc) {
+};
+const platformNames = (os, libc) => {
 	if (os === "win32") return ["pc-windows-msvc"];
 	if (os === "darwin") return ["apple-darwin"];
 	if (os === "android") return ["linux-android"];
 	if (os === "linux" && libc !== void 0) return [`unknown-linux-${libc}`];
 	return [];
-}
-async function resolveRuntimePlatform(options = {}) {
+};
+const resolveRuntimePlatform = async (options = {}) => {
 	const os = options.os ?? platform();
 	const cpu = options.cpu ?? arch();
 	const byteOrder = options.byteOrder ?? endianness();
@@ -810,8 +777,8 @@ async function resolveRuntimePlatform(options = {}) {
 		byteOrder,
 		cacheKey: `${architecture}-${targetPlatform}`
 	};
-}
-function selectReleaseAsset(assets, target) {
+};
+const selectReleaseAsset = (assets, target) => {
 	const architectures = architectureNames(target.cpu, target.byteOrder);
 	const platforms = platformNames(target.os, target.libc);
 	const candidates = architectures.flatMap((architecture) => platforms.map((targetPlatform) => `dprint-${architecture}-${targetPlatform}.zip`));
@@ -819,7 +786,7 @@ function selectReleaseAsset(assets, target) {
 	if (asset !== void 0) return asset;
 	const published = assets.filter((candidate) => candidate.name.endsWith(".zip")).map((candidate) => candidate.name).sort();
 	throw new Error(`No dprint release asset matches ${target.os}-${target.cpu}. Tried: ${candidates.join(", ") || "none"}. Published ZIPs: ${published.join(", ") || "none"}`);
-}
+};
 //#endregion
 //#region src/lib/version.ts
 const USER_AGENT = "dprint-check-action";
@@ -833,16 +800,16 @@ const jsonClient = { async getJson(url, headers = {}) {
 		result: await response.json()
 	};
 } };
-function specifiedVersion(input) {
+const specifiedVersion = (input) => {
 	const requested = input.trim();
 	return requested === "" || requested.toLowerCase() === "latest" ? void 0 : requested;
-}
-function isRelease(value) {
+};
+const isRelease = (value) => {
 	if (value === null || typeof value !== "object") return false;
 	const release = value;
 	return typeof release.tag_name === "string" && release.tag_name !== "" && Array.isArray(release.assets) && release.assets.every((asset) => asset !== null && typeof asset === "object" && typeof asset.name === "string" && typeof asset.browser_download_url === "string" && (asset.digest === null || typeof asset.digest === "string"));
-}
-async function resolveRelease(input, token = "", http = jsonClient) {
+};
+const resolveRelease = async (input, token = "", http = jsonClient) => {
 	const requested = specifiedVersion(input);
 	const endpoint = requested === void 0 ? `https://api.github.com/repos/${REPOSITORY}/releases/latest` : `https://api.github.com/repos/${REPOSITORY}/releases/tags/${encodeURIComponent(requested)}`;
 	const headers = {
@@ -855,13 +822,11 @@ async function resolveRelease(input, token = "", http = jsonClient) {
 	if (response.statusCode === 404) throw new Error(requested === void 0 ? "The latest dprint release was not found" : `dprint release ${requested} was not found`);
 	if (response.statusCode !== 200 || !isRelease(response.result)) throw new Error(`Failed to resolve dprint release ${requested ?? "latest"} (HTTP ${response.statusCode})`);
 	return response.result;
-}
+};
 //#endregion
 //#region src/lib/install.ts
-function installDir() {
-	return env["DPRINT_INSTALL"] ?? join(homedir(), ".dprint");
-}
-async function installDprint(versionInput, cacheEnabled, token) {
+const installDir = () => env["DPRINT_INSTALL"] ?? join(homedir(), ".dprint");
+const installDprint = async (versionInput, cacheEnabled, token) => {
 	let release;
 	let version = specifiedVersion(versionInput);
 	if (version === void 0) {
@@ -895,7 +860,7 @@ async function installDprint(versionInput, cacheEnabled, token) {
 			return await finalize(binaryPath, true, target.cacheKey);
 		}
 	} catch (error) {
-		warning(`Failed to restore dprint binary cache: ${describe$2(error)}`);
+		warning(`Failed to restore dprint binary cache: ${describeError(error)}`);
 	}
 	release ??= await resolveRelease(version, token);
 	debug(`Published release assets: ${release.assets.map((candidate) => candidate.name).join(", ")}`);
@@ -903,7 +868,7 @@ async function installDprint(versionInput, cacheEnabled, token) {
 	try {
 		asset = selectReleaseAsset(release.assets, target);
 	} catch (error) {
-		throw new Error(`dprint ${version} cannot be installed on ${target.cacheKey}: ${describe$2(error)}`);
+		throw new Error(`dprint ${version} cannot be installed on ${target.cacheKey}: ${describeError(error)}`);
 	}
 	info(`Selected release asset: ${asset.name}`);
 	const expectedChecksum = await resolveReleaseAssetChecksum(version, asset, release.assets);
@@ -926,8 +891,8 @@ async function installDprint(versionInput, cacheEnabled, token) {
 		saveState("BIN_CACHE_DIR", binDir);
 	}
 	return await finalize(binaryPath, false, target.cacheKey);
-}
-async function finalize(binaryPath, cacheHit, platformKey) {
+};
+const finalize = async (binaryPath, cacheHit, platformKey) => {
 	addPath(dirname(binaryPath));
 	debug(`Verifying installed binary: ${binaryPath} --version`);
 	const { stdout } = await execFileAsync(binaryPath, ["--version"]);
@@ -943,21 +908,18 @@ async function finalize(binaryPath, cacheHit, platformKey) {
 		cacheHit,
 		platformKey
 	};
-}
-function describe$2(error) {
-	return error instanceof Error ? error.message : String(error);
-}
+};
 //#endregion
 //#region src/lib/warmup.ts
 const ATTEMPTS = 3;
 const TIMEOUT_MS = 6e4;
-function isTimeoutKill(error) {
+const isTimeoutKill = (error) => {
 	if (error === null || typeof error !== "object") return false;
 	const killed = "killed" in error && error.killed === true;
 	const signal = "signal" in error && (error.signal === "SIGTERM" || error.signal === "SIGKILL");
 	return killed && signal;
-}
-async function warmupConfig(binaryPath, configPath, execute) {
+};
+const warmupConfig = async (binaryPath, configPath, execute) => {
 	for (let attempt = 1; attempt <= ATTEMPTS; attempt++) try {
 		await execute(binaryPath, [
 			"output-file-paths",
@@ -972,26 +934,21 @@ async function warmupConfig(binaryPath, configPath, execute) {
 		return true;
 	} catch (error) {
 		if (!isTimeoutKill(error)) {
-			warning(`Plugin warmup failed: ${describe$1(error)}`);
+			warning(`Plugin warmup failed: ${describeError(error)}`);
 			return false;
 		}
 		info(`Plugin warmup hung (>${TIMEOUT_MS / 1e3}s), attempt ${attempt}/${ATTEMPTS}`);
 	}
 	throw new Error(`Plugin warmup kept hanging after ${ATTEMPTS} attempts`);
-}
-async function warmupPlugins(binaryPath, configPaths, execute = execFileAsync) {
+};
+const warmupPlugins = async (binaryPath, configPaths, execute = execFileAsync) => {
 	for (const configPath of configPaths) if (!await warmupConfig(binaryPath, configPath, execute)) return false;
 	return true;
-}
-function describe$1(error) {
-	return error instanceof Error ? error.message : String(error);
-}
+};
 //#endregion
 //#region src/main.ts
-function pluginCacheDir() {
-	return env["DPRINT_CACHE_DIR"] ?? join(homedir(), ".cache", "dprint");
-}
-async function restorePluginCache(cacheDir, version, platformKey, binaryPath, configPathInput) {
+const pluginCacheDir = () => env["DPRINT_CACHE_DIR"] ?? join(homedir(), ".cache", "dprint");
+const restorePluginCache = async (cacheDir, version, platformKey, binaryPath, configPathInput) => {
 	const configPaths = await findConfigFiles(configPathInput || void 0);
 	debug(`Discovered ${configPaths.length} dprint config file(s)`);
 	if (configPaths.length === 0) {
@@ -1009,7 +966,7 @@ async function restorePluginCache(cacheDir, version, platformKey, binaryPath, co
 	try {
 		hitKey = await restoreCache([cacheDir], primaryKey, restoreKeys);
 	} catch (error) {
-		warning(`Failed to restore dprint plugin cache: ${describe(error)}`);
+		warning(`Failed to restore dprint plugin cache: ${describeError(error)}`);
 	}
 	const exactHit = hitKey === primaryKey;
 	debug(`Plugin cache restore result: ${hitKey ?? "miss"}; exact hit: ${exactHit}`);
@@ -1021,8 +978,8 @@ async function restorePluginCache(cacheDir, version, platformKey, binaryPath, co
 		return;
 	}
 	if (await warmupPlugins(binaryPath, configPaths)) saveState("PLUGIN_CACHE_READY", "true");
-}
-async function run() {
+};
+const run = async () => {
 	try {
 		const versionInput = getInput("dprint-version") || "latest";
 		const token = getInput("token");
@@ -1045,12 +1002,9 @@ async function run() {
 			await checkFormatting(location, configPathInput, additionalArgs);
 		} else info("dprint installed; check skipped because run-check is false");
 	} catch (error) {
-		setFailed(describe(error));
+		setFailed(describeError(error));
 	}
-}
-function describe(error) {
-	return error instanceof Error ? error.message : String(error);
-}
+};
 run();
 //#endregion
 export {};

@@ -8,7 +8,7 @@ export const CONFIG_NAMES = ["dprint.json", "dprint.jsonc", ".dprint.json", ".dp
 
 const workspacePath = () => env["GITHUB_WORKSPACE"] ?? cwd();
 
-export async function findConfigFiles(customPath?: string): Promise<string[]> {
+export const findConfigFiles = async (customPath?: string): Promise<string[]> => {
 	const workspace = workspacePath();
 	if (customPath !== undefined && customPath.trim() !== "") {
 		const pattern = isAbsolute(customPath) ? customPath : join(workspace, customPath);
@@ -27,13 +27,13 @@ export async function findConfigFiles(customPath?: string): Promise<string[]> {
 	}
 
 	return matches;
-}
+};
 
-export function computeCacheKey(
+export const computeCacheKey = (
 	configPaths: readonly string[],
 	dprintVersion: string,
 	platformKey: string,
-): { primaryKey: string; restoreKeys: string[] } {
+): { primaryKey: string; restoreKeys: string[] } => {
 	const workspace = workspacePath();
 	const hash = createHash("sha256");
 	for (const configPath of [...configPaths].sort()) {
@@ -51,4 +51,4 @@ export function computeCacheKey(
 		primaryKey: `${prefix}-${digest}`,
 		restoreKeys: [`${prefix}-`, `${platformPrefix}-`],
 	};
-}
+};

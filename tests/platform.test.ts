@@ -3,10 +3,9 @@ import { GLIBC, MUSL } from "detect-libc";
 
 import { resolveRuntimePlatform, selectReleaseAsset } from "#lib/platform";
 import type { ReleaseAsset } from "#lib/version";
+import { releaseAsset } from "#test/helpers";
 
-function assets(...names: string[]): ReleaseAsset[] {
-	return names.map(name => ({ name, browser_download_url: `https://example.com/${name}`, digest: null }));
-}
+const assets = (...names: string[]): ReleaseAsset[] => names.map(name => releaseAsset(name));
 
 const releaseAssets = assets(
 	"dprint-aarch64-apple-darwin.zip",

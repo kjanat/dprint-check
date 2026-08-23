@@ -7,22 +7,21 @@ import { env } from "node:process";
 import { addPath, debug, info, saveState, setOutput, warning } from "#lib/actions";
 import { isCacheAvailable, restoreCache } from "#lib/cache";
 import { resolveReleaseAssetChecksum, verifyReleaseAsset } from "#lib/checksum";
+import { describeError } from "#lib/error";
 import { execFileAsync } from "#lib/exec";
 import { resolveRuntimePlatform, selectReleaseAsset } from "#lib/platform";
 import { cacheToolDirectory, downloadTool, extractZip, findTool } from "#lib/tool";
 import type { Release, ReleaseAsset } from "#lib/version";
 import { resolveRelease, specifiedVersion } from "#lib/version";
 
-function installDir(): string {
-	return env["DPRINT_INSTALL"] ?? join(homedir(), ".dprint");
-}
+const installDir = (): string => env["DPRINT_INSTALL"] ?? join(homedir(), ".dprint");
 
-export async function installDprint(versionInput: string, cacheEnabled: boolean, token: string): Promise<{
+export const installDprint = async (versionInput: string, cacheEnabled: boolean, token: string): Promise<{
 	version: string;
 	location: string;
 	cacheHit: boolean;
 	platformKey: string;
-}> {
+}> => {
 	let release: Release | undefined;
 	let version = specifiedVersion(versionInput);
 	if (version === undefined) {
@@ -64,7 +63,7 @@ export async function installDprint(versionInput: string, cacheEnabled: boolean,
 				return await finalize(binaryPath, true, target.cacheKey);
 			}
 		} catch (error) {
-			warning(`Failed to restore dprint binary cache: ${describe(error)}`);
+			warning(`Failed to restore dprint binary cache: ${describeError(error)}`);
 		}
 	}
 
@@ -74,7 +73,7 @@ export async function installDprint(versionInput: string, cacheEnabled: boolean,
 	try {
 		asset = selectReleaseAsset(release.assets, target);
 	} catch (error) {
-		throw new Error(`dprint ${version} cannot be installed on ${target.cacheKey}: ${describe(error)}`);
+		throw new Error(`dprint ${version} cannot be installed on ${target.cacheKey}: ${describeError(error)}`);
 	}
 	info(`Selected release asset: ${asset.name}`);
 	const expectedChecksum = await resolveReleaseAssetChecksum(version, asset, release.assets);
@@ -99,13 +98,13 @@ export async function installDprint(versionInput: string, cacheEnabled: boolean,
 		saveState("BIN_CACHE_DIR", binDir);
 	}
 	return await finalize(binaryPath, false, target.cacheKey);
-}
+};
 
-async function finalize(
+const finalize = async (
 	binaryPath: string,
 	cacheHit: boolean,
 	platformKey: string,
-): Promise<{ version: string; location: string; cacheHit: boolean; platformKey: string }> {
+): Promise<{ version: string; location: string; cacheHit: boolean; platformKey: string }> => {
 	addPath(dirname(binaryPath));
 	debug(`Verifying installed binary: ${binaryPath} --version`);
 	const { stdout } = await execFileAsync(binaryPath, ["--version"]);
@@ -116,8 +115,4 @@ async function finalize(
 	setOutput("cache-hit", cacheHit);
 	info(`dprint ${version} ready at ${binaryPath}`);
 	return { version, location: binaryPath, cacheHit, platformKey };
-}
-
-function describe(error: unknown): string {
-	return error instanceof Error ? error.message : String(error);
-}
+};

@@ -5,27 +5,27 @@ import { readFile } from "node:fs/promises";
 import { downloadTool } from "#lib/tool";
 import type { ReleaseAsset } from "#lib/version";
 
-function digestFromAsset(asset: ReleaseAsset): string | undefined {
+const digestFromAsset = (asset: ReleaseAsset): string | undefined => {
 	const match = asset.digest?.match(/^sha256:([0-9a-f]{64})$/iu);
 	return match?.[1]?.toLowerCase();
-}
+};
 
-export function checksumFromManifest(manifest: string, assetName: string): string | undefined {
+export const checksumFromManifest = (manifest: string, assetName: string): string | undefined => {
 	for (const line of manifest.split(/\r?\n/u)) {
 		const match = line.match(/^([0-9a-f]{64})\s+\*?(.+)$/iu);
 		if (match?.[2] === assetName) return match[1]?.toLowerCase();
 	}
 	return undefined;
-}
+};
 
 type Download = (url: string) => Promise<string>;
 
-export async function resolveReleaseAssetChecksum(
+export const resolveReleaseAssetChecksum = async (
 	releaseTag: string,
 	asset: ReleaseAsset,
 	assets: readonly ReleaseAsset[],
 	download: Download = downloadTool,
-): Promise<string> {
+): Promise<string> => {
 	const digest = digestFromAsset(asset);
 	if (digest !== undefined) return digest;
 
@@ -43,21 +43,21 @@ export async function resolveReleaseAssetChecksum(
 		);
 	}
 	return checksum;
-}
+};
 
-async function sha256(path: string): Promise<string> {
+const sha256 = async (path: string): Promise<string> => {
 	const hash = createHash("sha256");
 	for await (const chunk of createReadStream(path)) hash.update(chunk);
 	return hash.digest("hex");
-}
+};
 
-export async function verifyReleaseAsset(
+export const verifyReleaseAsset = async (
 	archivePath: string,
 	asset: ReleaseAsset,
 	expectedChecksum: string,
-): Promise<void> {
+): Promise<void> => {
 	const actual = await sha256(archivePath);
 	if (actual !== expectedChecksum) {
 		throw new Error(`SHA-256 mismatch for ${asset.name}: expected ${expectedChecksum}, got ${actual}`);
 	}
-}
+};

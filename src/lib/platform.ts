@@ -21,24 +21,24 @@ interface RuntimePlatformOptions {
 	detectLibc?: () => Promise<string | null>;
 }
 
-function architectureNames(cpu: string, byteOrder: "BE" | "LE"): string[] {
+const architectureNames = (cpu: string, byteOrder: "BE" | "LE"): string[] => {
 	if (cpu === "x64") return ["x86_64"];
 	if (cpu === "arm64") return ["aarch64"];
 	if (cpu === "riscv64") return ["riscv64gc", "riscv64"];
 	if (cpu === "loong64") return ["loongarch64", "loong64"];
 	if (cpu === "ppc64" && byteOrder === "LE") return ["powerpc64le"];
 	return [cpu];
-}
+};
 
-function platformNames(os: string, libc?: Libc): string[] {
+const platformNames = (os: string, libc?: Libc): string[] => {
 	if (os === "win32") return ["pc-windows-msvc"];
 	if (os === "darwin") return ["apple-darwin"];
 	if (os === "android") return ["linux-android"];
 	if (os === "linux" && libc !== undefined) return [`unknown-linux-${libc}`];
 	return [];
-}
+};
 
-export async function resolveRuntimePlatform(options: RuntimePlatformOptions = {}): Promise<RuntimePlatform> {
+export const resolveRuntimePlatform = async (options: RuntimePlatformOptions = {}): Promise<RuntimePlatform> => {
 	const os = options.os ?? platform();
 	const cpu = options.cpu ?? arch();
 	const byteOrder = options.byteOrder ?? endianness();
@@ -53,9 +53,9 @@ export async function resolveRuntimePlatform(options: RuntimePlatformOptions = {
 	const architecture = architectureNames(cpu, byteOrder)[0] ?? cpu;
 	const targetPlatform = platformNames(os, libc)[0] ?? os;
 	return { os, cpu, libc, byteOrder, cacheKey: `${architecture}-${targetPlatform}` };
-}
+};
 
-export function selectReleaseAsset(assets: readonly ReleaseAsset[], target: RuntimePlatform): ReleaseAsset {
+export const selectReleaseAsset = (assets: readonly ReleaseAsset[], target: RuntimePlatform): ReleaseAsset => {
 	const architectures = architectureNames(target.cpu, target.byteOrder);
 	const platforms = platformNames(target.os, target.libc);
 	const candidates = architectures.flatMap(architecture =>
@@ -70,4 +70,4 @@ export function selectReleaseAsset(assets: readonly ReleaseAsset[], target: Runt
 			candidates.join(", ") || "none"
 		}. Published ZIPs: ${published.join(", ") || "none"}`,
 	);
-}
+};

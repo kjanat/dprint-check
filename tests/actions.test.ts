@@ -1,6 +1,5 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { describe, expect, spyOn, test } from "bun:test";
+import { readFile, writeFile } from "node:fs/promises";
 import { delimiter, join } from "node:path";
 
 import {
@@ -15,27 +14,12 @@ import {
 	setSecret,
 	warning,
 } from "#lib/actions";
+import { useTestContext } from "#test/helpers";
 
-const temporaryDirectories: string[] = [];
-const originalEnvironment = new Map<string, string | undefined>();
-
-function setEnvironment(name: string, value: string | undefined): void {
-	if (!originalEnvironment.has(name)) originalEnvironment.set(name, process.env[name]);
-	if (value === undefined) delete process.env[name];
-	else process.env[name] = value;
-}
-
-afterEach(async () => {
-	for (const [name, value] of originalEnvironment) {
-		if (value === undefined) delete process.env[name];
-		else process.env[name] = value;
-	}
-	originalEnvironment.clear();
-	await Promise.all(temporaryDirectories.splice(0).map(path => rm(path, { recursive: true, force: true })));
-});
+const context = useTestContext();
 
 test("reads action inputs with the toolkit's whitespace behavior", () => {
-	setEnvironment("INPUT_CONFIG-PATH", "  configs/dprint.json  \n");
+	context.setEnvironment("INPUT_CONFIG-PATH", "  configs/dprint.json  \n");
 
 	expect(getInput("config-path")).toBe("configs/dprint.json");
 	expect(getInput("config-path", { trimWhitespace: false })).toBe("  configs/dprint.json  \n");
@@ -44,14 +28,13 @@ test("reads action inputs with the toolkit's whitespace behavior", () => {
 
 describe("GitHub file commands", () => {
 	test("writes multiline outputs and state without workflow-command escaping", async () => {
-		const directory = await mkdtemp(join(tmpdir(), "dprint-actions-"));
-		temporaryDirectories.push(directory);
+		const directory = await context.temporaryDirectory("dprint-actions-");
 		const outputFile = join(directory, "output.txt");
 		const stateFile = join(directory, "state.txt");
 		await writeFile(outputFile, "");
 		await writeFile(stateFile, "");
-		setEnvironment("GITHUB_OUTPUT", outputFile);
-		setEnvironment("GITHUB_STATE", stateFile);
+		context.setEnvironment("GITHUB_OUTPUT", outputFile);
+		context.setEnvironment("GITHUB_STATE", stateFile);
 
 		setOutput("cache-hit", true);
 		setOutput("details", "first\nsecond");
@@ -66,15 +49,15 @@ describe("GitHub file commands", () => {
 	});
 
 	test("exports environment variables and prepends paths", async () => {
-		const directory = await mkdtemp(join(tmpdir(), "dprint-actions-"));
-		temporaryDirectories.push(directory);
+		const directory = await context.temporaryDirectory("dprint-actions-");
 		const environmentFile = join(directory, "environment.txt");
 		const pathFile = join(directory, "path.txt");
 		await writeFile(environmentFile, "");
 		await writeFile(pathFile, "");
-		setEnvironment("GITHUB_ENV", environmentFile);
-		setEnvironment("GITHUB_PATH", pathFile);
-		setEnvironment("PATH", "/existing/path");
+		context.setEnvironment("GITHUB_ENV", environmentFile);
+		context.setEnvironment("GITHUB_PATH", pathFile);
+		context.setEnvironment("DPRINT_CACHE_DIR", undefined);
+		context.setEnvironment("PATH", "/existing/path");
 
 		exportVariable("DPRINT_CACHE_DIR", "/cache/dprint");
 		addPath("/tools/dprint");
@@ -89,16 +72,17 @@ describe("GitHub file commands", () => {
 });
 
 test("reads action state", () => {
-	setEnvironment("STATE_CACHE_KEY", "dprint-cache-key");
+	context.setEnvironment("STATE_CACHE_KEY", "dprint-cache-key");
 	expect(getState("CACHE_KEY")).toBe("dprint-cache-key");
 });
 
 test("emits escaped workflow commands when file commands are unavailable", () => {
-	setEnvironment("GITHUB_OUTPUT", undefined);
-	setEnvironment("GITHUB_STATE", undefined);
-	setEnvironment("GITHUB_ENV", undefined);
-	setEnvironment("GITHUB_PATH", undefined);
-	setEnvironment("PATH", "/existing/path");
+	context.setEnvironment("GITHUB_OUTPUT", undefined);
+	context.setEnvironment("GITHUB_STATE", undefined);
+	context.setEnvironment("GITHUB_ENV", undefined);
+	context.setEnvironment("GITHUB_PATH", undefined);
+	context.setEnvironment("DPRINT_CACHE_DIR", undefined);
+	context.setEnvironment("PATH", "/existing/path");
 	const write = spyOn(process.stdout, "write").mockImplementation(() => true);
 	try {
 		setSecret("secret%\r\n");

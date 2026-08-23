@@ -2,7 +2,7 @@ import { execFileAsync } from "#lib/exec";
 
 type Execute = (commandLine: string, args: string[]) => Promise<unknown>;
 
-export function parseArgs(input: string): string[] {
+export const parseArgs = (input: string): string[] => {
 	const args: string[] = [];
 	let current = "";
 	let quote: "'" | "\"" | undefined;
@@ -46,20 +46,20 @@ export function parseArgs(input: string): string[] {
 	if (quote !== undefined) throw new Error("Unterminated quote in args input");
 	if (started) args.push(current);
 	return args;
-}
+};
 
-export function buildCheckArgs(configPath: string, additionalArgs: string): string[] {
+export const buildCheckArgs = (configPath: string, additionalArgs: string): string[] => {
 	const args = ["check"];
 	if (configPath !== "") args.push("--config", configPath);
 	if (additionalArgs.trim() !== "") args.push(...parseArgs(additionalArgs));
 	return args;
-}
+};
 
-export async function checkFormatting(
+export const checkFormatting = async (
 	binaryPath: string,
 	configPath: string,
 	additionalArgs: string,
 	execute: Execute = execFileAsync,
-): Promise<void> {
+): Promise<void> => {
 	await execute(binaryPath, buildCheckArgs(configPath, additionalArgs));
-}
+};

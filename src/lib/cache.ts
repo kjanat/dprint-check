@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { createWriteStream } from "node:fs";
-import { mkdir, mkdtemp, open, rm, stat, writeFile } from "node:fs/promises";
+import { mkdir, open, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, relative, sep } from "node:path";
 import { env as processEnv } from "node:process";
@@ -9,23 +9,22 @@ import { pipeline } from "node:stream/promises";
 
 import { debug, setSecret } from "#lib/actions";
 import { execFileAsync } from "#lib/exec";
+import { requestWithRetry } from "#lib/http";
+import type { RetryOptions } from "#lib/http";
+import { createTemporaryDirectory } from "#lib/temp";
 
 const SERVICE = "github.actions.results.api.v1.CacheService";
 const VERSION_SALT = "1.0";
 const UPLOAD_CHUNK_SIZE = 32 * 1024 * 1024;
-const RETRY_ATTEMPTS = 3;
 
 type Environment = Record<string, string | undefined>;
-type Fetch = (input: string | URL, init?: RequestInit) => Promise<Response>;
 type Execute = (file: string, args: string[], options?: { cwd?: string }) => Promise<unknown>;
 
-interface CacheOptions {
+interface CacheOptions extends Pick<RetryOptions, "fetch" | "sleep"> {
 	debug?: (message: string) => void;
 	environment?: Environment;
-	fetch?: Fetch;
 	execute?: Execute;
 	maskSecret?: (secret: string) => void;
-	sleep?: (milliseconds: number) => Promise<void>;
 }
 
 type Compression = "gzip" | "zstd-without-long";
@@ -50,35 +49,33 @@ interface FinalizeResponse {
 	message?: string;
 }
 
-function environment(options: CacheOptions): Environment {
-	return options.environment ?? processEnv;
-}
+const environment = (options: CacheOptions): Environment => options.environment ?? processEnv;
 
-function cacheModeAllows(mode: string | undefined, operation: "read" | "write"): boolean {
+const cacheModeAllows = (mode: string | undefined, operation: "read" | "write"): boolean => {
 	const normalized = mode?.trim().toLowerCase();
 	if (normalized === undefined || !["none", "read", "write", "write-only"].includes(normalized)) return true;
 	return operation === "read"
 		? normalized === "read" || normalized === "write"
 		: normalized === "write" || normalized === "write-only";
-}
+};
 
-export function isCacheAvailable(environment: Environment = processEnv): boolean {
+export const isCacheAvailable = (environment: Environment = processEnv): boolean => {
 	const server = new URL(environment["GITHUB_SERVER_URL"] ?? "https://github.com").hostname.toUpperCase();
 	const githubHosted = server === "GITHUB.COM" || server.endsWith(".GHE.COM") || server.endsWith(".LOCALHOST");
 	return githubHosted && environment["ACTIONS_RESULTS_URL"] !== undefined
 		&& environment["ACTIONS_RUNTIME_TOKEN"] !== undefined;
-}
+};
 
-function validateKeys(primaryKey: string, restoreKeys: readonly string[] = []): void {
+const validateKeys = (primaryKey: string, restoreKeys: readonly string[] = []): void => {
 	const keys = [primaryKey, ...restoreKeys];
 	if (keys.length > 10) throw new Error("Cache keys are limited to a maximum of 10");
 	for (const key of keys) {
 		if (key.length > 512) throw new Error(`Cache key cannot exceed 512 characters: ${key}`);
 		if (key.includes(",")) throw new Error(`Cache key cannot contain commas: ${key}`);
 	}
-}
+};
 
-async function compression(execute: Execute): Promise<Compression> {
+const compression = async (execute: Execute): Promise<Compression> => {
 	if (process.platform === "win32") return "gzip";
 	try {
 		await execute("zstd", ["--quiet", "--version"]);
@@ -86,46 +83,38 @@ async function compression(execute: Execute): Promise<Compression> {
 	} catch {
 		return "gzip";
 	}
-}
+};
 
-export function cacheVersion(paths: readonly string[], method: Compression): string {
-	return createHash("sha256").update([...paths, method, VERSION_SALT].join("|")).digest("hex");
-}
+export const cacheVersion = (paths: readonly string[], method: Compression): string =>
+	createHash("sha256").update([...paths, method, VERSION_SALT].join("|")).digest("hex");
 
-function workspace(environment: Environment): string {
-	return environment["GITHUB_WORKSPACE"] ?? process.cwd();
-}
+const workspace = (environment: Environment): string => environment["GITHUB_WORKSPACE"] ?? process.cwd();
 
-function relativePaths(paths: readonly string[], environment: Environment): string[] {
+const relativePaths = (paths: readonly string[], environment: Environment): string[] => {
 	const root = workspace(environment);
 	return paths.map(path => {
 		const result = relative(root, path).split(sep).join("/") || ".";
 		if (result.includes("\n")) throw new Error(`Cache path cannot contain a newline: ${path}`);
 		return result;
 	});
-}
+};
 
-async function tempDirectory(environment: Environment): Promise<string> {
-	const root = environment["RUNNER_TEMP"] ?? tmpdir();
-	await mkdir(root, { recursive: true });
-	return await mkdtemp(join(root, "dprint-cache-"));
-}
+const tempDirectory = (environment: Environment): Promise<string> =>
+	createTemporaryDirectory(environment["RUNNER_TEMP"] ?? tmpdir(), "dprint-cache-");
 
-function archiveName(method: Compression): string {
-	return method === "gzip" ? "cache.tgz" : "cache.tzst";
-}
+const archiveName = (method: Compression): string => method === "gzip" ? "cache.tgz" : "cache.tzst";
 
-function tarCompression(method: Compression, extract: boolean): string[] {
+const tarCompression = (method: Compression, extract: boolean): string[] => {
 	if (method === "gzip") return [extract ? "-xzf" : "-czf"];
 	return [extract ? "-xf" : "-cf", "--use-compress-program", extract ? "unzstd" : "zstdmt"];
-}
+};
 
-async function createArchive(
+const createArchive = async (
 	paths: readonly string[],
 	method: Compression,
 	directory: string,
 	options: CacheOptions,
-): Promise<string> {
+): Promise<string> => {
 	for (const path of paths) await stat(path);
 	const manifest = join(directory, "manifest.txt");
 	await writeFile(manifest, relativePaths(paths, environment(options)).join("\n"));
@@ -142,9 +131,9 @@ async function createArchive(
 		manifest,
 	], { cwd: directory });
 	return archive;
-}
+};
 
-async function extractArchive(archive: string, method: Compression, options: CacheOptions): Promise<void> {
+const extractArchive = async (archive: string, method: Compression, options: CacheOptions): Promise<void> => {
 	await mkdir(workspace(environment(options)), { recursive: true });
 	const [operation, ...compressionArgs] = tarCompression(method, true);
 	await (options.execute ?? execFileAsync)("tar", [
@@ -155,35 +144,21 @@ async function extractArchive(archive: string, method: Compression, options: Cac
 		"-C",
 		workspace(environment(options)),
 	]);
-}
+};
 
-async function sleep(milliseconds: number): Promise<void> {
-	await new Promise(resolve => setTimeout(resolve, milliseconds));
-}
+const request = (
+	input: string | URL,
+	init: RequestInit | undefined,
+	options: CacheOptions,
+): Promise<Response> =>
+	requestWithRetry(input, init, {
+		fetch: options.fetch,
+		sleep: options.sleep,
+		onRetry: (attempt, attempts) =>
+			(options.debug ?? debug)(`Cache request attempt ${attempt}/${attempts} failed; retrying`),
+	});
 
-async function request(input: string | URL, init: RequestInit | undefined, options: CacheOptions): Promise<Response> {
-	const fetch = options.fetch ?? globalThis.fetch;
-	let lastError: unknown;
-	let lastResponse: Response | undefined;
-	for (let attempt = 1; attempt <= RETRY_ATTEMPTS; attempt++) {
-		try {
-			const response = await fetch(input, init);
-			if (response.ok || response.status < 500 && response.status !== 429) return response;
-			lastResponse = response;
-			lastError = new Error(`HTTP ${response.status}`);
-		} catch (error) {
-			lastError = error;
-		}
-		if (attempt < RETRY_ATTEMPTS) {
-			(options.debug ?? debug)(`Cache request attempt ${attempt}/${RETRY_ATTEMPTS} failed; retrying`);
-			await (options.sleep ?? sleep)(attempt * 1000);
-		}
-	}
-	if (lastResponse !== undefined) return lastResponse;
-	throw lastError instanceof Error ? lastError : new Error(String(lastError));
-}
-
-async function twirp<T>(method: string, body: object, options: CacheOptions): Promise<T> {
+const twirp = async <T>(method: string, body: object, options: CacheOptions): Promise<T> => {
 	const runtime = environment(options);
 	const baseUrl = runtime["ACTIONS_RESULTS_URL"];
 	const token = runtime["ACTIONS_RUNTIME_TOKEN"];
@@ -201,16 +176,16 @@ async function twirp<T>(method: string, body: object, options: CacheOptions): Pr
 	const result = await response.json() as T & { msg?: string };
 	if (!response.ok) throw new Error(result.msg ?? `Cache service returned HTTP ${response.status}`);
 	return result;
-}
+};
 
-async function download(url: string, destination: string, options: CacheOptions): Promise<void> {
+const download = async (url: string, destination: string, options: CacheOptions): Promise<void> => {
 	(options.maskSecret ?? setSecret)(url);
 	const response = await request(url, undefined, options);
 	if (!response.ok || response.body === null) throw new Error(`Cache download failed with HTTP ${response.status}`);
 	await pipeline(Readable.fromWeb(response.body as never), createWriteStream(destination));
-}
+};
 
-async function uploadBlock(url: URL, blockId: string, body: Uint8Array, options: CacheOptions): Promise<void> {
+const uploadBlock = async (url: URL, blockId: string, body: Uint8Array, options: CacheOptions): Promise<void> => {
 	const blockUrl = new URL(url);
 	blockUrl.searchParams.set("comp", "block");
 	blockUrl.searchParams.set("blockid", blockId);
@@ -224,9 +199,9 @@ async function uploadBlock(url: URL, blockId: string, body: Uint8Array, options:
 		body,
 	}, options);
 	if (!response.ok) throw new Error(`Cache block upload failed with HTTP ${response.status}`);
-}
+};
 
-async function upload(urlString: string, archive: string, options: CacheOptions): Promise<void> {
+const upload = async (urlString: string, archive: string, options: CacheOptions): Promise<void> => {
 	(options.maskSecret ?? setSecret)(urlString);
 	const url = new URL(urlString);
 	const file = await open(archive, "r");
@@ -260,14 +235,14 @@ async function upload(urlString: string, archive: string, options: CacheOptions)
 		body,
 	}, options);
 	if (!response.ok) throw new Error(`Cache block-list upload failed with HTTP ${response.status}`);
-}
+};
 
-export async function restoreCache(
+export const restoreCache = async (
 	paths: readonly string[],
 	primaryKey: string,
 	restoreKeys: readonly string[] = [],
 	options: CacheOptions = {},
-): Promise<string | undefined> {
+): Promise<string | undefined> => {
 	validateKeys(primaryKey, restoreKeys);
 	if (!cacheModeAllows(environment(options)["ACTIONS_CACHE_MODE"], "read")) return undefined;
 	const execute = options.execute ?? execFileAsync;
@@ -294,9 +269,9 @@ export async function restoreCache(
 	} finally {
 		await rm(directory, { recursive: true, force: true });
 	}
-}
+};
 
-export async function saveCache(paths: readonly string[], key: string, options: CacheOptions = {}): Promise<void> {
+export const saveCache = async (paths: readonly string[], key: string, options: CacheOptions = {}): Promise<void> => {
 	validateKeys(key);
 	if (!cacheModeAllows(environment(options)["ACTIONS_CACHE_MODE"], "write")) return;
 	const execute = options.execute ?? execFileAsync;
@@ -319,4 +294,4 @@ export async function saveCache(paths: readonly string[], key: string, options: 
 	} finally {
 		await rm(directory, { recursive: true, force: true });
 	}
-}
+};

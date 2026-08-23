@@ -1,25 +1,17 @@
-import { env } from "bun";
-import { afterEach, describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { describe, expect, test } from "bun:test";
+import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { computeCacheKey, findConfigFiles } from "#lib/config";
+import { useTestContext } from "#test/helpers";
 
-env["GITHUB_WORKSPACE"] = undefined;
-const temporaryDirectories: string[] = [];
+const context = useTestContext();
 
-afterEach(async () => {
-	await Promise.all(temporaryDirectories.splice(0).map(path => rm(path, { recursive: true, force: true })));
-	env["GITHUB_WORKSPACE"] = undefined;
-});
-
-async function workspace(): Promise<string> {
-	const path = await mkdtemp(join(tmpdir(), "dprint-check-"));
-	temporaryDirectories.push(path);
-	env["GITHUB_WORKSPACE"] = path;
+const workspace = async (): Promise<string> => {
+	const path = await context.temporaryDirectory("dprint-check-");
+	context.setEnvironment("GITHUB_WORKSPACE", path);
 	return path;
-}
+};
 
 describe("findConfigFiles", () => {
 	test("prioritizes the root config and includes nested configs", async () => {

@@ -1,7 +1,8 @@
 import { debug, getState, info, warning } from "#lib/actions";
 import { isCacheAvailable, saveCache } from "#lib/cache";
+import { describeError } from "#lib/error";
 
-async function save(paths: string[], key: string, label: string): Promise<void> {
+const save = async (paths: string[], key: string, label: string): Promise<void> => {
 	info(`Saving ${label}: ${paths.join(", ")} -> ${key}`);
 	try {
 		await saveCache(paths, key);
@@ -11,9 +12,9 @@ async function save(paths: string[], key: string, label: string): Promise<void> 
 			info(`${label} entry already exists`);
 		} else throw error;
 	}
-}
+};
 
-async function post(): Promise<void> {
+const post = async (): Promise<void> => {
 	if (!isCacheAvailable()) {
 		info("GitHub Actions cache is unavailable; nothing to save");
 		return;
@@ -42,12 +43,8 @@ async function post(): Promise<void> {
 		}
 		await save([pluginDir], pluginKey, "dprint plugin cache");
 	} catch (error) {
-		warning(`Cache save failed: ${describe(error)}`);
+		warning(`Cache save failed: ${describeError(error)}`);
 	}
-}
-
-function describe(error: unknown): string {
-	return error instanceof Error ? error.message : String(error);
-}
+};
 
 void post();

@@ -1,5 +1,5 @@
 import { createWriteStream, existsSync } from "node:fs";
-import { cp, mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { env } from "node:process";
@@ -8,41 +8,33 @@ import { pipeline } from "node:stream/promises";
 
 import { debug } from "#lib/actions";
 import { execFileAsync } from "#lib/exec";
+import { requestWithRetry } from "#lib/http";
+import type { RetryOptions } from "#lib/http";
+import { createTemporaryDirectory } from "#lib/temp";
 
-const DOWNLOAD_ATTEMPTS = 3;
+type DownloadOptions = Pick<RetryOptions, "fetch" | "sleep">;
 
-interface DownloadOptions {
-	fetch?: (input: string | URL | Request, init?: RequestInit) => Promise<Response>;
-	sleep?: (milliseconds: number) => Promise<void>;
-}
+const temporaryRoot = (): string => env["RUNNER_TEMP"] ?? tmpdir();
 
-function temporaryRoot(): string {
-	return env["RUNNER_TEMP"] ?? tmpdir();
-}
+const temporaryDirectory = (prefix: string): Promise<string> => createTemporaryDirectory(temporaryRoot(), prefix);
 
-async function temporaryDirectory(prefix: string): Promise<string> {
-	const root = temporaryRoot();
-	await mkdir(root, { recursive: true });
-	return await mkdtemp(join(root, prefix));
-}
-
-function toolPath(tool: string, version: string, architecture: string): string | undefined {
+const toolPath = (tool: string, version: string, architecture: string): string | undefined => {
 	const root = env["RUNNER_TOOL_CACHE"];
 	return root === undefined || root === "" ? undefined : join(root, tool, version, architecture);
-}
+};
 
-export function findTool(tool: string, version: string, architecture: string): string {
+export const findTool = (tool: string, version: string, architecture: string): string => {
 	const path = toolPath(tool, version, architecture);
 	if (path !== undefined && existsSync(path) && existsSync(`${path}.complete`)) return path;
 	return "";
-}
+};
 
-export async function cacheToolDirectory(
+export const cacheToolDirectory = async (
 	sourceDirectory: string,
 	tool: string,
 	version: string,
 	architecture: string,
-): Promise<string> {
+): Promise<string> => {
 	const destination = toolPath(tool, version, architecture);
 	if (destination === undefined) {
 		debug("RUNNER_TOOL_CACHE is unavailable; skipping tool-cache storage");
@@ -56,46 +48,28 @@ export async function cacheToolDirectory(
 	}
 	await writeFile(`${destination}.complete`, "");
 	return destination;
-}
+};
 
-function retryableStatus(status: number): boolean {
-	return status === 408 || status === 429 || status >= 500;
-}
-
-export async function downloadTool(url: string, options: DownloadOptions = {}): Promise<string> {
-	const fetch = options.fetch ?? globalThis.fetch;
-	const sleep = options.sleep ?? (milliseconds => new Promise(resolve => setTimeout(resolve, milliseconds)));
+export const downloadTool = async (url: string, options: DownloadOptions = {}): Promise<string> => {
 	const directory = await temporaryDirectory("dprint-download-");
 	const destination = join(directory, "download");
-	let lastError: unknown;
-	for (let attempt = 1; attempt <= DOWNLOAD_ATTEMPTS; attempt++) {
-		let response: Response;
-		try {
-			response = await fetch(url);
-		} catch (error) {
-			lastError = error;
-			if (attempt < DOWNLOAD_ATTEMPTS) await sleep(attempt * 1000);
-			continue;
-		}
+	try {
+		const response = await requestWithRetry(url, undefined, options);
 		if (!response.ok || response.body === null) {
-			lastError = new Error(`Download failed with HTTP ${response.status}`);
-			if (!retryableStatus(response.status)) break;
-			if (attempt < DOWNLOAD_ATTEMPTS) await sleep(attempt * 1000);
-			continue;
+			throw new Error(`Download failed with HTTP ${response.status}`);
 		}
 		await mkdir(dirname(destination), { recursive: true });
 		await pipeline(Readable.fromWeb(response.body as never), createWriteStream(destination));
 		return destination;
+	} catch (error) {
+		await rm(directory, { recursive: true, force: true });
+		throw error;
 	}
-	await rm(directory, { recursive: true, force: true });
-	throw lastError instanceof Error ? lastError : new Error(String(lastError));
-}
+};
 
-function powershellLiteral(value: string): string {
-	return `'${value.replaceAll("'", "''").replace(/["\r\n]/gu, "")}'`;
-}
+const powershellLiteral = (value: string): string => `'${value.replaceAll("'", "''").replace(/["\r\n]/gu, "")}'`;
 
-export async function extractZip(archive: string): Promise<string> {
+export const extractZip = async (archive: string): Promise<string> => {
 	const destination = await temporaryDirectory("dprint-extract-");
 	if (process.platform === "win32") {
 		const command = `Expand-Archive -LiteralPath ${powershellLiteral(archive)} -DestinationPath ${
@@ -111,4 +85,4 @@ export async function extractZip(archive: string): Promise<string> {
 		await execFileAsync("unzip", ["-o", "-q", archive, "-d", destination]);
 	}
 	return destination;
-}
+};

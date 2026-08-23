@@ -2,17 +2,14 @@ import { describe, expect, test } from "bun:test";
 import type { OutgoingHttpHeaders } from "node:http";
 
 import { resolveRelease, specifiedVersion } from "#lib/version";
+import { releaseAsset } from "#test/helpers";
 
 const release = {
 	tag_name: "0.56.1",
-	assets: [{
-		name: "dprint.zip",
-		browser_download_url: "https://example.com/dprint.zip",
-		digest: null,
-	}],
+	assets: [releaseAsset("dprint.zip")],
 };
 
-function successfulClient() {
+const successfulClient = () => {
 	const requests: Array<{ url: string; headers?: OutgoingHttpHeaders }> = [];
 	const getJson = async <T>(url: string, headers?: OutgoingHttpHeaders): Promise<{
 		statusCode: number;
@@ -22,7 +19,7 @@ function successfulClient() {
 		return { statusCode: 200, result: release as T };
 	};
 	return { client: { getJson }, requests };
-}
+};
 
 test.each([
 	{ label: "explicit version", input: " 0.56.1 ", expected: "0.56.1" },

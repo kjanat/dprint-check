@@ -6,44 +6,59 @@ import { mkdir, mkdtemp, open, rm, stat, writeFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 //#region src/lib/actions.ts
-function escapeData(value) {
-	return value.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
-}
-function escapeProperty(value) {
-	return escapeData(value).replaceAll(":", "%3A").replaceAll(",", "%2C");
-}
-function command(name, value, properties = {}) {
+const escapeData = (value) => value.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
+const escapeProperty = (value) => escapeData(value).replaceAll(":", "%3A").replaceAll(",", "%2C");
+const command = (name, value, properties = {}) => {
 	const serialized = Object.entries(properties).map(([key, property]) => `${key}=${escapeProperty(property)}`).join(",");
 	process.stdout.write(`::${name}${serialized === "" ? "" : ` ${serialized}`}::${escapeData(value)}${EOL}`);
-}
-function setSecret(secret) {
-	command("add-mask", secret);
-}
-function debug(message) {
-	command("debug", message);
-}
-function info(message) {
-	process.stdout.write(`${message}${EOL}`);
-}
-function warning(message) {
-	command("warning", message);
-}
-function getState(name) {
-	return env[`STATE_${name}`] ?? "";
-}
+};
+const setSecret = (secret) => command("add-mask", secret);
+const debug = (message) => command("debug", message);
+const info = (message) => void process.stdout.write(`${message}${EOL}`);
+const warning = (message) => command("warning", message);
+const getState = (name) => env[`STATE_${name}`] ?? "";
 //#endregion
 //#region src/lib/exec.ts
 const execFileAsync = promisify(execFile);
+//#endregion
+//#region src/lib/http.ts
+const isRetryableStatus = (status) => status === 408 || status === 429 || status >= 500;
+const sleep = (milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds));
+const requestWithRetry = async (input, init, options = {}) => {
+	const attempts = options.attempts ?? 3;
+	const fetch = options.fetch ?? globalThis.fetch;
+	let lastError;
+	let lastResponse;
+	for (let attempt = 1; attempt <= attempts; attempt++) {
+		try {
+			const response = await fetch(input, init);
+			if (response.ok || !isRetryableStatus(response.status)) return response;
+			lastResponse = response;
+			lastError = /* @__PURE__ */ new Error(`HTTP ${response.status}`);
+		} catch (error) {
+			lastError = error;
+		}
+		if (attempt < attempts) {
+			options.onRetry?.(attempt, attempts);
+			await (options.sleep ?? sleep)(attempt * 1e3);
+		}
+	}
+	if (lastResponse !== void 0) return lastResponse;
+	throw lastError instanceof Error ? lastError : new Error(String(lastError));
+};
+//#endregion
+//#region src/lib/temp.ts
+const createTemporaryDirectory = async (root, prefix) => {
+	await mkdir(root, { recursive: true });
+	return mkdtemp(join(root, prefix));
+};
 //#endregion
 //#region src/lib/cache.ts
 const SERVICE = "github.actions.results.api.v1.CacheService";
 const VERSION_SALT = "1.0";
 const UPLOAD_CHUNK_SIZE = 33554432;
-const RETRY_ATTEMPTS = 3;
-function environment(options) {
-	return options.environment ?? env;
-}
-function cacheModeAllows(mode, operation) {
+const environment = (options) => options.environment ?? env;
+const cacheModeAllows = (mode, operation) => {
 	const normalized = mode?.trim().toLowerCase();
 	if (normalized === void 0 || ![
 		"none",
@@ -52,20 +67,20 @@ function cacheModeAllows(mode, operation) {
 		"write-only"
 	].includes(normalized)) return true;
 	return operation === "read" ? normalized === "read" || normalized === "write" : normalized === "write" || normalized === "write-only";
-}
-function isCacheAvailable(environment = env) {
+};
+const isCacheAvailable = (environment = env) => {
 	const server = new URL(environment["GITHUB_SERVER_URL"] ?? "https://github.com").hostname.toUpperCase();
 	return (server === "GITHUB.COM" || server.endsWith(".GHE.COM") || server.endsWith(".LOCALHOST")) && environment["ACTIONS_RESULTS_URL"] !== void 0 && environment["ACTIONS_RUNTIME_TOKEN"] !== void 0;
-}
-function validateKeys(primaryKey, restoreKeys = []) {
+};
+const validateKeys = (primaryKey, restoreKeys = []) => {
 	const keys = [primaryKey, ...restoreKeys];
 	if (keys.length > 10) throw new Error("Cache keys are limited to a maximum of 10");
 	for (const key of keys) {
 		if (key.length > 512) throw new Error(`Cache key cannot exceed 512 characters: ${key}`);
 		if (key.includes(",")) throw new Error(`Cache key cannot contain commas: ${key}`);
 	}
-}
-async function compression(execute) {
+};
+const compression = async (execute) => {
 	if (process.platform === "win32") return "gzip";
 	try {
 		await execute("zstd", ["--quiet", "--version"]);
@@ -73,42 +88,32 @@ async function compression(execute) {
 	} catch {
 		return "gzip";
 	}
-}
-function cacheVersion(paths, method) {
-	return createHash("sha256").update([
-		...paths,
-		method,
-		VERSION_SALT
-	].join("|")).digest("hex");
-}
-function workspace(environment) {
-	return environment["GITHUB_WORKSPACE"] ?? process.cwd();
-}
-function relativePaths(paths, environment) {
+};
+const cacheVersion = (paths, method) => createHash("sha256").update([
+	...paths,
+	method,
+	VERSION_SALT
+].join("|")).digest("hex");
+const workspace = (environment) => environment["GITHUB_WORKSPACE"] ?? process.cwd();
+const relativePaths = (paths, environment) => {
 	const root = workspace(environment);
 	return paths.map((path) => {
 		const result = relative(root, path).split(sep).join("/") || ".";
 		if (result.includes("\n")) throw new Error(`Cache path cannot contain a newline: ${path}`);
 		return result;
 	});
-}
-async function tempDirectory(environment) {
-	const root = environment["RUNNER_TEMP"] ?? tmpdir();
-	await mkdir(root, { recursive: true });
-	return await mkdtemp(join(root, "dprint-cache-"));
-}
-function archiveName(method) {
-	return method === "gzip" ? "cache.tgz" : "cache.tzst";
-}
-function tarCompression(method, extract) {
+};
+const tempDirectory = (environment) => createTemporaryDirectory(environment["RUNNER_TEMP"] ?? tmpdir(), "dprint-cache-");
+const archiveName = (method) => method === "gzip" ? "cache.tgz" : "cache.tzst";
+const tarCompression = (method, extract) => {
 	if (method === "gzip") return [extract ? "-xzf" : "-czf"];
 	return [
 		extract ? "-xf" : "-cf",
 		"--use-compress-program",
 		extract ? "unzstd" : "zstdmt"
 	];
-}
-async function createArchive(paths, method, directory, options) {
+};
+const createArchive = async (paths, method, directory, options) => {
 	for (const path of paths) await stat(path);
 	const manifest = join(directory, "manifest.txt");
 	await writeFile(manifest, relativePaths(paths, environment(options)).join("\n"));
@@ -125,37 +130,19 @@ async function createArchive(paths, method, directory, options) {
 		manifest
 	], { cwd: directory });
 	return archive;
-}
-async function sleep(milliseconds) {
-	await new Promise((resolve) => setTimeout(resolve, milliseconds));
-}
-async function request(input, init, options) {
-	const fetch = options.fetch ?? globalThis.fetch;
-	let lastError;
-	let lastResponse;
-	for (let attempt = 1; attempt <= RETRY_ATTEMPTS; attempt++) {
-		try {
-			const response = await fetch(input, init);
-			if (response.ok || response.status < 500 && response.status !== 429) return response;
-			lastResponse = response;
-			lastError = /* @__PURE__ */ new Error(`HTTP ${response.status}`);
-		} catch (error) {
-			lastError = error;
-		}
-		if (attempt < RETRY_ATTEMPTS) {
-			(options.debug ?? debug)(`Cache request attempt ${attempt}/${RETRY_ATTEMPTS} failed; retrying`);
-			await (options.sleep ?? sleep)(attempt * 1e3);
-		}
-	}
-	if (lastResponse !== void 0) return lastResponse;
-	throw lastError instanceof Error ? lastError : new Error(String(lastError));
-}
-async function twirp(method, body, options) {
+};
+const request = (input, init, options) => requestWithRetry(input, init, {
+	fetch: options.fetch,
+	sleep: options.sleep,
+	onRetry: (attempt, attempts) => (options.debug ?? debug)(`Cache request attempt ${attempt}/${attempts} failed; retrying`)
+});
+const twirp = async (method, body, options) => {
 	const runtime = environment(options);
 	const baseUrl = runtime["ACTIONS_RESULTS_URL"];
 	const token = runtime["ACTIONS_RUNTIME_TOKEN"];
 	if (baseUrl === void 0 || token === void 0) throw new Error("GitHub Actions cache service is unavailable");
-	const response = await request(new URL(`/twirp/${SERVICE}/${method}`, baseUrl), {
+	const url = new URL(`/twirp/${SERVICE}/${method}`, baseUrl);
+	const response = await request(url, {
 		method: "POST",
 		headers: {
 			accept: "application/json",
@@ -167,8 +154,8 @@ async function twirp(method, body, options) {
 	const result = await response.json();
 	if (!response.ok) throw new Error(result.msg ?? `Cache service returned HTTP ${response.status}`);
 	return result;
-}
-async function uploadBlock(url, blockId, body, options) {
+};
+const uploadBlock = async (url, blockId, body, options) => {
 	const blockUrl = new URL(url);
 	blockUrl.searchParams.set("comp", "block");
 	blockUrl.searchParams.set("blockid", blockId);
@@ -182,8 +169,8 @@ async function uploadBlock(url, blockId, body, options) {
 		body
 	}, options);
 	if (!response.ok) throw new Error(`Cache block upload failed with HTTP ${response.status}`);
-}
-async function upload(urlString, archive, options) {
+};
+const upload = async (urlString, archive, options) => {
 	(options.maskSecret ?? setSecret)(urlString);
 	const url = new URL(urlString);
 	const file = await open(archive, "r");
@@ -214,11 +201,12 @@ async function upload(urlString, archive, options) {
 		body
 	}, options);
 	if (!response.ok) throw new Error(`Cache block-list upload failed with HTTP ${response.status}`);
-}
-async function saveCache(paths, key, options = {}) {
+};
+const saveCache = async (paths, key, options = {}) => {
 	validateKeys(key);
 	if (!cacheModeAllows(environment(options)["ACTIONS_CACHE_MODE"], "write")) return;
-	const method = await compression(options.execute ?? execFileAsync);
+	const execute = options.execute ?? execFileAsync;
+	const method = await compression(execute);
 	const version = cacheVersion(paths, method);
 	const directory = await tempDirectory(environment(options));
 	try {
@@ -243,10 +231,13 @@ async function saveCache(paths, key, options = {}) {
 			force: true
 		});
 	}
-}
+};
+//#endregion
+//#region src/lib/error.ts
+const describeError = (error) => error instanceof Error ? error.message : String(error);
 //#endregion
 //#region src/post.ts
-async function save(paths, key, label) {
+const save = async (paths, key, label) => {
 	info(`Saving ${label}: ${paths.join(", ")} -> ${key}`);
 	try {
 		await saveCache(paths, key);
@@ -255,8 +246,8 @@ async function save(paths, key, label) {
 		if (error instanceof Error && error.message.includes("already exists")) info(`${label} entry already exists`);
 		else throw error;
 	}
-}
-async function post() {
+};
+const post = async () => {
 	if (!isCacheAvailable()) {
 		info("GitHub Actions cache is unavailable; nothing to save");
 		return;
@@ -283,12 +274,9 @@ async function post() {
 		}
 		await save([pluginDir], pluginKey, "dprint plugin cache");
 	} catch (error) {
-		warning(`Cache save failed: ${describe(error)}`);
+		warning(`Cache save failed: ${describeError(error)}`);
 	}
-}
-function describe(error) {
-	return error instanceof Error ? error.message : String(error);
-}
+};
 post();
 //#endregion
 export {};

@@ -29,12 +29,12 @@ const jsonClient: JsonClient = {
 	},
 };
 
-export function specifiedVersion(input: string): string | undefined {
+export const specifiedVersion = (input: string): string | undefined => {
 	const requested = input.trim();
 	return requested === "" || requested.toLowerCase() === "latest" ? undefined : requested;
-}
+};
 
-function isRelease(value: unknown): value is Release {
+const isRelease = (value: unknown): value is Release => {
 	if (value === null || typeof value !== "object") return false;
 	const release = value as Partial<Release>;
 	return typeof release.tag_name === "string" && release.tag_name !== ""
@@ -47,13 +47,13 @@ function isRelease(value: unknown): value is Release {
 			&& ((asset as Partial<ReleaseAsset>).digest === null
 				|| typeof (asset as Partial<ReleaseAsset>).digest === "string")
 		);
-}
+};
 
-export async function resolveRelease(
+export const resolveRelease = async (
 	input: string,
 	token = "",
 	http: JsonClient = jsonClient,
-): Promise<Release> {
+): Promise<Release> => {
 	const requested = specifiedVersion(input);
 	const endpoint = requested === undefined
 		? `https://api.github.com/repos/${REPOSITORY}/releases/latest`
@@ -74,4 +74,4 @@ export async function resolveRelease(
 		throw new Error(`Failed to resolve dprint release ${requested ?? "latest"} (HTTP ${response.statusCode})`);
 	}
 	return response.result;
-}
+};
