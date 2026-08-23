@@ -2,11 +2,20 @@
 	"$schema": "https://dprint.dev/schemas/v0.json",
 	"useTabs": true,
 	"lineWidth": 120,
+	"pwsh": {
+		"braceStyle": "sameLine",
+		"useTabs": true,
+		"keywordCasing": true,
+		"spaceAroundOperator": true,
+		"spaceAroundPipe": true,
+		"spaceAfterSeparator": true
+	},
 	"excludes": ["dist", "node_modules", "**/fixtures"],
 	"plugins": [
 		"npm:@dprint/json@0.23.0",
 		"npm:@dprint/markdown@0.22.1",
 		"npm:dprint-plugin-yaml@0.6.0",
-		"npm:@dprint/typescript@0.96.1"
+		"npm:@dprint/typescript@0.96.1",
+		"https://plugins.dprint.dev/kjanat/pwsh-0.2.0.wasm"
 	]
 }

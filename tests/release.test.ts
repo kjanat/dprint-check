@@ -1,0 +1,97 @@
+import { describe, expect, test } from "bun:test";
+import { dirname, join } from "node:path";
+
+import { execFileAsync } from "#lib/exec";
+
+const root = dirname(import.meta.dir);
+const commonScript = join(root, ".github", "scripts", "Release.Common.ps1");
+const invokePowerShell = async (script: string) =>
+	(
+		await execFileAsync(
+			"pwsh",
+			["-NoProfile", "-NonInteractive", "-Command", script],
+			{ cwd: root },
+		)
+	).stdout.trimEnd();
+
+describe("release PowerShell", () => {
+	test("all release scripts parse", async () => {
+		const output = await invokePowerShell(`
+$failed = $false
+Get-ChildItem '.github/scripts/*.ps1' | ForEach-Object {
+	$tokens = $null
+	$errors = $null
+	[void][Management.Automation.Language.Parser]::ParseFile($_.FullName, [ref]$tokens, [ref]$errors)
+	foreach ($error in $errors) {
+		$failed = $true
+		Write-Error ("{0}:{1}: {2}" -f $_.FullName, $error.Extent.StartLineNumber, $error.Message)
+	}
+}
+if ($failed) { exit 1 }
+'valid'
+`);
+		expect(output).toBe("valid");
+	});
+
+	test("annotates release errors before throwing", async () => {
+		const annotation = await invokePowerShell(`
+. '${commonScript}'
+try { Write-ReleaseError "bad%line\`nnext" } catch {}
+exit 0
+`);
+		expect(annotation).toBe("::error::bad%25line%0Anext");
+		const failure = await invokePowerShell(`
+. '${commonScript}'
+trap { Write-UnhandledReleaseError $_; break }
+Write-ReleaseError 'release failed'
+`).then(
+			() => undefined,
+			error => error as Error & { stdout: string },
+		);
+		expect(failure).toBeInstanceOf(Error);
+		expect(failure?.message).toContain("release failed");
+		expect(failure?.stdout.trimEnd()).toBe("::error::release failed");
+	});
+
+	test("renders valid Markdown before generated release notes", async () => {
+		const output = await invokePowerShell(`
+. '${commonScript}'
+$commits = @([pscustomobject]@{
+	sha = 'dc61e8325cafac8757b0aa33e513cb3f3a187342'
+	commit = [pscustomobject]@{ message = "Strengthen CI and release verification\`n\`nDetails" }
+})
+$notes = Format-ReleaseNote -Commits $commits -RepositoryUrl 'https://github.com/kjanat/dprint-check'
+$notes | ConvertTo-Json -Compress
+`);
+		expect(JSON.parse(output)).toBe(
+			"## Changes\n\n"
+				+ "- [`dc61e83`](https://github.com/kjanat/dprint-check/commit/dc61e8325cafac8757b0aa33e513cb3f3a187342): Strengthen CI and release verification\n\n",
+		);
+	});
+
+	test("selects previous and floating releases by semantic version", async () => {
+		const output = await invokePowerShell(`
+. '${commonScript}'
+$tags = @('v3.0.2', 'v3.1.0', 'v3.0.3')
+@{
+	previous = Get-PreviousStableReleaseVersion -Tags $tags -Version 'v3.1.1'
+	minor = Get-LatestStableReleaseVersion -Tags $tags -Prefix 'v3.0'
+	major = Get-LatestStableReleaseVersion -Tags $tags -Prefix 'v3'
+} | ConvertTo-Json -Compress
+`);
+		expect(JSON.parse(output)).toEqual({ previous: "v3.1.0", minor: "v3.0.3", major: "v3.1.0" });
+	});
+
+	test("returns no release outside an empty semantic version range", async () => {
+		const output = await invokePowerShell(`
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+. '${commonScript}'
+@{
+	previous = Get-PreviousStableReleaseVersion -Tags @() -Version 'v3.0.0'
+	latest = Get-LatestStableReleaseVersion -Tags @('v2.9.9') -Prefix 'v3'
+} | ConvertTo-Json -Compress
+`);
+		expect(JSON.parse(output)).toEqual({ previous: null, latest: null });
+	});
+});
