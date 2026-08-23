@@ -30,7 +30,7 @@ describe("action metadata", () => {
 			[ACTION_INPUT.dprintVersion, DPRINT.latestVersion],
 			[ACTION_INPUT.token, "${{ github.token }}"],
 			[ACTION_INPUT.cache, ACTION_VALUE.true],
-			[ACTION_INPUT.runCheck, ACTION_VALUE.true],
+			[ACTION_INPUT.installOnly, ACTION_VALUE.false],
 			[ACTION_INPUT.configPath, ""],
 			[ACTION_INPUT.args, ""],
 		] as const,

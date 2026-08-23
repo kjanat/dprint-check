@@ -17,7 +17,7 @@ declare const action: Readonly<{
 		"dprint-version": ActionInput<"latest">;
 		token: ActionInput<"${{ github.token }}">;
 		cache: ActionInput<"true">;
-		"run-check": ActionInput<"true">;
+		"install-only": ActionInput<"false">;
 		"config-path": ActionInput<"">;
 		args: ActionInput<"">;
 	}>;

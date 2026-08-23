@@ -16,10 +16,10 @@ inputs:
     description: "Cache the dprint binary and compiled WASM plugins"
     required: false
     default: "true"
-  run-check:
-    description: "Run dprint check after installation (set to false for install-only use)"
+  install-only:
+    description: "Install dprint and populate its caches without running dprint check"
     required: false
-    default: "true"
+    default: "false"
   config-path:
     description: "Specific dprint config to use (ex. dprint.json)"
     required: false

@@ -73,13 +73,12 @@ const run = async (): Promise<void> => {
 		const configPathInput = getInput(ACTION_INPUT.configPath);
 		const additionalArgs = getInput(ACTION_INPUT.args, { trimWhitespace: false });
 		const cacheEnabled = getInput(ACTION_INPUT.cache) !== ACTION_VALUE.false;
-		const checkEnabled = getInput(ACTION_INPUT.runCheck) !== ACTION_VALUE.false;
+		const installOnly = getInput(ACTION_INPUT.installOnly) === ACTION_VALUE.true;
 		const cacheDir = pluginCacheDir();
 		debug(
 			`Inputs: ${ACTION_INPUT.dprintVersion}=${versionInput}; ${ACTION_INPUT.token}=${
 				token === "" ? "not provided" : "provided"
-			}; ${ACTION_INPUT.cache}=${cacheEnabled}; ${ACTION_INPUT.runCheck}=${checkEnabled}; ${ACTION_INPUT.configPath}=$
-			{
+			}; ${ACTION_INPUT.cache}=${cacheEnabled}; ${ACTION_INPUT.installOnly}=${installOnly}; ${ACTION_INPUT.configPath}=${
 				configPathInput || "auto"
 			}; ${ACTION_INPUT.args}=${additionalArgs === "" ? "none" : "provided"}`,
 		);
@@ -93,10 +92,10 @@ const run = async (): Promise<void> => {
 			await restorePluginCache(cacheDir, version, platformKey, location, configPathInput);
 		} else if (cacheEnabled) warning("GitHub Actions cache is unavailable; skipping plugin cache");
 
-		if (checkEnabled) {
+		if (!installOnly) {
 			debug("Running dprint check");
 			await checkFormatting(location, configPathInput, additionalArgs);
-		} else info("dprint installed; check skipped because run-check is false");
+		} else info("dprint installed; check skipped because install-only is true");
 	} catch (error) {
 		setFailed(describeError(error));
 	}

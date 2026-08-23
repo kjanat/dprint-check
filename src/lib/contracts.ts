@@ -3,7 +3,7 @@ export const ACTION_INPUT = {
 	cache: "cache",
 	configPath: "config-path",
 	dprintVersion: "dprint-version",
-	runCheck: "run-check",
+	installOnly: "install-only",
 	token: "token",
 } as const;
 

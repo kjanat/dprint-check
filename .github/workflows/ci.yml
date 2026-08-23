@@ -14,7 +14,7 @@ jobs:
       - { uses: actions/setup-node@v7, with: { node-version: 24 } }
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
-      - run: bun run --sequential typecheck test build
+      - run: bun run check
       - run: dprint check
       - run: git diff --exit-code -- dist
 

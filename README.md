@@ -24,18 +24,17 @@ To disable caching:
 
 ```yml
 - uses: dprint/check@v3
-  with:
-    cache: false
+  with: { cache: false }
 ```
 
 ### Install only
 
-Set `run-check` to `false` to install dprint and populate its caches without checking formatting. The installed binary is
+Set `install-only` to `true` to install dprint and populate its caches without checking formatting. The installed binary is
 added to `PATH` for later steps.
 
 ```yml
 - uses: dprint/check@v3
-  with: { run-check: false }
+  with: { install-only: true }
 - run: dprint fmt
 ```
 
@@ -85,7 +84,7 @@ E.g. to only check changed files:
 | `dprint-version` | latest          | dprint release to install                     |
 | `token`          | `github.token`  | Token used to query GitHub release metadata   |
 | `cache`          | `true`          | Cache the binary and compiled WASM plugins    |
-| `run-check`      | `true`          | Run `dprint check` after installation         |
+| `install-only`   | `false`         | Install without running `dprint check`        |
 | `config-path`    | auto-discovered | Configuration passed to dprint                |
 | `args`           |                 | Additional arguments passed to `dprint check` |
 
