@@ -1,4 +1,4 @@
 node_modules/
-/dist/*
-!/dist/main.mjs
-!/dist/post.mjs
+# dist should be built and attested in CI,
+# and committed through 'git add --force dist'
+/dist/
