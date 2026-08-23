@@ -78,9 +78,9 @@ jobs:
         env: { OUTPUTS: "${{ toJSON(steps.dprint.outputs) }}" }
         run: |
           $outputs = $env:OUTPUTS | ConvertFrom-Json
-          if ($outputs.cache-hit         -ne "false") { throw "Unexpected binary cache hit" }
-          if ($outputs.plugin-cache-hit  -ne "false") { throw "Unexpected plugin cache hit" }
-          if ($outputs.plugin-cache-key  -ne "false") { throw "Unexpected plugin cache key" }
+          if ($outputs.'cache-hit'        -ne "false") { throw "Unexpected binary cache hit" }
+          if ($outputs.'plugin-cache-hit' -ne "false") { throw "Unexpected plugin cache hit" }
+          if ($outputs.'plugin-cache-key' -ne "")      { throw "Unexpected plugin cache key" }
 
   cache-prime:
     runs-on: ${{ matrix.os }}

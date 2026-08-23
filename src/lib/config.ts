@@ -1,19 +1,15 @@
 import { create as globCreate } from "@actions/glob";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
-import { arch } from "node:os";
 import { isAbsolute, join, relative, sep } from "node:path";
-import { cwd, env, platform } from "node:process";
+import { cwd, env } from "node:process";
 
-const CONFIG_NAMES = ["dprint.json", "dprint.jsonc", ".dprint.json", ".dprint.jsonc"] as const;
-const sys = {
-	arch: arch(),
-	platform: env["RUNNER_OS"] ?? platform,
-	workspace: env["GITHUB_WORKSPACE"] ?? cwd(),
-};
+export const CONFIG_NAMES = ["dprint.json", "dprint.jsonc", ".dprint.json", ".dprint.jsonc"] as const;
+
+const workspacePath = () => env["GITHUB_WORKSPACE"] ?? cwd();
 
 export async function findConfigFiles(customPath?: string): Promise<string[]> {
-	const { workspace } = sys;
+	const workspace = workspacePath();
 	if (customPath !== undefined && customPath.trim() !== "") {
 		const pattern = isAbsolute(customPath) ? customPath : join(workspace, customPath);
 		const globber = await globCreate(pattern, { followSymbolicLinks: false });
@@ -41,8 +37,9 @@ export async function findConfigFiles(customPath?: string): Promise<string[]> {
 export function computeCacheKey(
 	configPaths: readonly string[],
 	dprintVersion: string,
+	platformKey: string,
 ): { primaryKey: string; restoreKeys: string[] } {
-	const { workspace } = sys;
+	const workspace = workspacePath();
 	const hash = createHash("sha256");
 	for (const configPath of [...configPaths].sort()) {
 		const stablePath = relative(workspace, configPath).split(sep).join("/");
@@ -52,10 +49,11 @@ export function computeCacheKey(
 		hash.update("\0");
 	}
 	const digest = hash.digest("hex");
-	const prefix = `dprint-plugins-v1-${sys.platform}-${sys.arch}-${dprintVersion}`;
+	const platformPrefix = `dprint-plugins-v2-${platformKey}`;
+	const prefix = `${platformPrefix}-${dprintVersion}`;
 
 	return {
 		primaryKey: `${prefix}-${digest}`,
-		restoreKeys: [`${prefix}-`, `dprint-plugins-v1-${sys.platform}-${sys.arch}-`],
+		restoreKeys: [`${prefix}-`, `${platformPrefix}-`],
 	};
 }

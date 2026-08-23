@@ -1,19 +1,24 @@
+import { family, GLIBC, MUSL } from "detect-libc";
 import { arch, endianness, platform } from "node:os";
 
-import { execFileAsync } from "#lib/exec";
 import type { ReleaseAsset } from "#lib/version";
 
-async function detectLibc(): Promise<"gnu" | "musl"> {
-	try {
-		const { stdout } = await execFileAsync("ldd", ["--version"], { timeout: 5_000 });
-		return stdout.toLowerCase().includes("musl") ? "musl" : "gnu";
-	} catch (error: unknown) {
-		if (
-			error !== null && typeof error === "object" && "stderr" in error
-			&& typeof (error as { stderr: unknown }).stderr === "string"
-		) return (error as { stderr: string }).stderr.toLowerCase().includes("musl") ? "musl" : "gnu";
-		return "gnu";
-	}
+export type Libc = "gnu" | "musl";
+
+export interface RuntimePlatform {
+	os: string;
+	cpu: string;
+	libc?: Libc;
+	byteOrder: "BE" | "LE";
+	cacheKey: string;
+}
+
+interface RuntimePlatformOptions {
+	os?: string;
+	cpu?: string;
+	libc?: Libc;
+	byteOrder?: "BE" | "LE";
+	detectLibc?: () => Promise<string | null>;
 }
 
 function architectureNames(cpu: string, byteOrder: "BE" | "LE"): string[] {
@@ -25,23 +30,34 @@ function architectureNames(cpu: string, byteOrder: "BE" | "LE"): string[] {
 	return [cpu];
 }
 
-async function platformNames(os: string, libc?: "gnu" | "musl"): Promise<string[]> {
+function platformNames(os: string, libc?: Libc): string[] {
 	if (os === "win32") return ["pc-windows-msvc"];
 	if (os === "darwin") return ["apple-darwin"];
 	if (os === "android") return ["linux-android"];
-	if (os === "linux") return [`unknown-linux-${libc ?? await detectLibc()}`];
+	if (os === "linux" && libc !== undefined) return [`unknown-linux-${libc}`];
 	return [];
 }
 
-export async function selectReleaseAsset(
-	assets: readonly ReleaseAsset[],
-	os = platform(),
-	cpu = arch(),
-	libc?: "gnu" | "musl",
-	byteOrder = endianness(),
-): Promise<ReleaseAsset> {
-	const architectures = architectureNames(cpu, byteOrder);
-	const platforms = await platformNames(os, libc);
+export async function resolveRuntimePlatform(options: RuntimePlatformOptions = {}): Promise<RuntimePlatform> {
+	const os = options.os ?? platform();
+	const cpu = options.cpu ?? arch();
+	const byteOrder = options.byteOrder ?? endianness();
+	let libc = options.libc;
+	if (os === "linux" && libc === undefined) {
+		const detected = await (options.detectLibc ?? family)();
+		if (detected === GLIBC) libc = "gnu";
+		else if (detected === MUSL) libc = "musl";
+		else throw new Error("Could not determine whether this Linux runner uses GNU libc or musl");
+	}
+
+	const architecture = architectureNames(cpu, byteOrder)[0] ?? cpu;
+	const targetPlatform = platformNames(os, libc)[0] ?? os;
+	return { os, cpu, libc, byteOrder, cacheKey: `${architecture}-${targetPlatform}` };
+}
+
+export function selectReleaseAsset(assets: readonly ReleaseAsset[], target: RuntimePlatform): ReleaseAsset {
+	const architectures = architectureNames(target.cpu, target.byteOrder);
+	const platforms = platformNames(target.os, target.libc);
 	const candidates = architectures.flatMap(architecture =>
 		platforms.map(targetPlatform => `dprint-${architecture}-${targetPlatform}.zip`)
 	);
@@ -50,8 +66,8 @@ export async function selectReleaseAsset(
 
 	const published = assets.filter(candidate => candidate.name.endsWith(".zip")).map(candidate => candidate.name).sort();
 	throw new Error(
-		`No dprint release asset matches ${os}-${cpu}. Tried: ${candidates.join(", ") || "none"}. Published ZIPs: ${
-			published.join(", ") || "none"
-		}`,
+		`No dprint release asset matches ${target.os}-${target.cpu}. Tried: ${
+			candidates.join(", ") || "none"
+		}. Published ZIPs: ${published.join(", ") || "none"}`,
 	);
 }

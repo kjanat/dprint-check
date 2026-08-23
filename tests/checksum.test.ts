@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, mock, test } from "bun:test";
 import { createHash } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -41,9 +41,13 @@ describe("verifyReleaseAsset", () => {
 		await writeFile(archive, "verified archive");
 		const digest = createHash("sha256").update("verified archive").digest("hex");
 		const releaseAsset = asset("dprint.zip", `sha256:${digest}`);
+		const download = mock(async () => {
+			throw new Error("checksum manifest should not be downloaded");
+		});
 
-		const expected = await resolveReleaseAssetChecksum("0.56.1", releaseAsset, [releaseAsset]);
+		const expected = await resolveReleaseAssetChecksum("0.56.1", releaseAsset, [releaseAsset], download);
 		expect(verifyReleaseAsset(archive, releaseAsset, expected)).resolves.toBeUndefined();
+		expect(download).not.toHaveBeenCalled();
 	});
 
 	test("rejects a mismatched GitHub digest", async () => {
@@ -51,14 +55,17 @@ describe("verifyReleaseAsset", () => {
 		temporaryDirectories.push(directory);
 		const archive = join(directory, "dprint.zip");
 		await writeFile(archive, "unverified archive");
-		const releaseAsset = asset("dprint.zip", `sha256:${"0".repeat(64)}`);
+		const expectedChecksum = "0".repeat(64);
+		const actualChecksum = createHash("sha256").update("unverified archive").digest("hex");
+		const releaseAsset = asset("dprint.zip", `sha256:${expectedChecksum}`);
 
 		const expected = await resolveReleaseAssetChecksum("0.56.1", releaseAsset, [releaseAsset]);
-		expect(verifyReleaseAsset(archive, releaseAsset, expected)).rejects.toThrow("SHA-256 mismatch");
+		expect(verifyReleaseAsset(archive, releaseAsset, expected)).rejects.toThrow(
+			`SHA-256 mismatch for dprint.zip: expected ${expectedChecksum}, got ${actualChecksum}`,
+		);
 	});
 
 	test("downloads the checksum manifest for older release assets", async () => {
-		expect.assertions(2);
 		const directory = await mkdtemp(join(tmpdir(), "dprint-checksum-"));
 		temporaryDirectories.push(directory);
 		const archive = join(directory, "dprint.zip");
@@ -68,28 +75,43 @@ describe("verifyReleaseAsset", () => {
 		await writeFile(manifest, `${digest}  dprint.zip\n`);
 		const releaseAsset = asset("dprint.zip", null);
 		const checksumAsset = asset("SHASUMS256.txt", null);
+		const download = mock(async () => manifest);
 
 		const expected = await resolveReleaseAssetChecksum(
 			"0.49.1",
 			releaseAsset,
 			[releaseAsset, checksumAsset],
-			async url => {
-				expect(url).toBe(checksumAsset.browser_download_url);
-				return manifest;
-			},
+			download,
 		);
+		expect(download).toHaveBeenCalledTimes(1);
+		expect(download).toHaveBeenCalledWith(checksumAsset.browser_download_url);
 		expect(verifyReleaseAsset(archive, releaseAsset, expected)).resolves.toBeUndefined();
 	});
 
 	test("rejects unverifiable historical releases before downloading anything", async () => {
-		expect.assertions(2);
 		const releaseAsset = asset("dprint.zip", null);
-		let downloadCalled = false;
-
-		expect(resolveReleaseAssetChecksum("0.13.1", releaseAsset, [releaseAsset], async () => {
-			downloadCalled = true;
+		const download = mock(async () => {
 			throw new Error("download should not run");
-		})).rejects.toThrow("dprint 0.13.1 cannot be securely installed");
-		expect(downloadCalled).toBeFalse();
+		});
+
+		expect(resolveReleaseAssetChecksum("0.13.1", releaseAsset, [releaseAsset], download)).rejects.toThrow(
+			"dprint 0.13.1 cannot be securely installed",
+		);
+		expect(download).not.toHaveBeenCalled();
+	});
+
+	test("rejects a checksum manifest without the selected asset", async () => {
+		const directory = await mkdtemp(join(tmpdir(), "dprint-checksum-"));
+		temporaryDirectories.push(directory);
+		const manifest = join(directory, "SHASUMS256.txt");
+		await writeFile(manifest, `${"a".repeat(64)}  another-asset.zip\n`);
+		const releaseAsset = asset("dprint.zip", null);
+		const checksumAsset = asset("SHASUMS256.txt", null);
+		const download = mock(async () => manifest);
+
+		expect(resolveReleaseAssetChecksum("0.49.1", releaseAsset, [releaseAsset, checksumAsset], download)).rejects
+			.toThrow("SHASUMS256.txt has no checksum for dprint.zip");
+		expect(download).toHaveBeenCalledTimes(1);
+		expect(download).toHaveBeenCalledWith(checksumAsset.browser_download_url);
 	});
 });

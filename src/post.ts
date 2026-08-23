@@ -1,5 +1,6 @@
-import { isFeatureAvailable, saveCache } from "@actions/cache";
-import { getState, info, warning } from "@actions/core";
+import { debug, getState, info, warning } from "@actions/core";
+
+import { isCacheAvailable, saveCache } from "#lib/cache";
 
 async function save(paths: string[], key: string, label: string): Promise<void> {
 	info(`Saving ${label}: ${paths.join(", ")} -> ${key}`);
@@ -14,7 +15,7 @@ async function save(paths: string[], key: string, label: string): Promise<void> 
 }
 
 async function post(): Promise<void> {
-	if (!isFeatureAvailable()) {
+	if (!isCacheAvailable()) {
 		info("GitHub Actions cache is unavailable; nothing to save");
 		return;
 	}
@@ -22,10 +23,12 @@ async function post(): Promise<void> {
 	try {
 		const binaryKey = getState("BIN_CACHE_KEY");
 		const binaryDir = getState("BIN_CACHE_DIR");
+		debug(`Post binary cache state: key=${binaryKey || "none"}; directory=${binaryDir || "none"}`);
 		if (binaryKey !== "" && binaryDir !== "") await save([binaryDir], binaryKey, "dprint binary cache");
 
 		const pluginKey = getState("PLUGIN_CACHE_KEY");
 		const pluginDir = getState("PLUGIN_CACHE_DIR");
+		debug(`Post plugin cache state: key=${pluginKey || "none"}; directory=${pluginDir || "none"}`);
 		if (pluginKey === "" || pluginDir === "") {
 			info("No plugin cache to save");
 			return;

@@ -50,7 +50,7 @@ export async function resolveRelease(
 		: `https://api.github.com/repos/${REPOSITORY}/releases/tags/${encodeURIComponent(requested)}`;
 	const headers: OutgoingHttpHeaders = {
 		accept: "application/vnd.github+json",
-		"x-github-api-version": "2022-11-28",
+		"x-github-api-version": "2026-03-10",
 	};
 	if (token !== "") headers.authorization = `Bearer ${token}`;
 	const response = await http.getJson<unknown>(endpoint, headers);

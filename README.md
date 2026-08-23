@@ -16,9 +16,9 @@ jobs:
       - uses: dprint/check@v3
 ```
 
-The cache is enabled by default. Its key includes the dprint version, runner OS and architecture, and the contents of
-every discovered dprint config. The action warms the plugins after a cache miss so the following dprint invocation does
-not compile them.
+The cache is enabled by default. Its key includes the dprint version, runner target (including Linux libc), and the
+contents of every discovered dprint config. The action warms the plugins after a cache miss so the following dprint
+invocation does not compile them.
 
 To disable caching:
 

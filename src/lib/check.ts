@@ -1,10 +1,13 @@
 import { exec } from "@actions/exec";
 
+type Execute = (commandLine: string, args: string[]) => Promise<unknown>;
+
 export function parseArgs(input: string): string[] {
 	const args: string[] = [];
 	let current = "";
 	let quote: "'" | "\"" | undefined;
 	let escaped = false;
+	let started = false;
 
 	for (const character of input) {
 		if (escaped) {
@@ -24,21 +27,24 @@ export function parseArgs(input: string): string[] {
 		}
 		if (character === "\"" || character === "'") {
 			quote = character;
+			started = true;
 			continue;
 		}
 		if (/\s/u.test(character)) {
-			if (current !== "") {
+			if (started) {
 				args.push(current);
 				current = "";
+				started = false;
 			}
 			continue;
 		}
 		current += character;
+		started = true;
 	}
 
 	if (escaped) current += "\\";
 	if (quote !== undefined) throw new Error("Unterminated quote in args input");
-	if (current !== "") args.push(current);
+	if (started) args.push(current);
 	return args;
 }
 
@@ -49,6 +55,11 @@ export function buildCheckArgs(configPath: string, additionalArgs: string): stri
 	return args;
 }
 
-export async function checkFormatting(binaryPath: string, configPath: string, additionalArgs: string): Promise<void> {
-	await exec(binaryPath, buildCheckArgs(configPath, additionalArgs));
+export async function checkFormatting(
+	binaryPath: string,
+	configPath: string,
+	additionalArgs: string,
+	execute: Execute = exec,
+): Promise<void> {
+	await execute(binaryPath, buildCheckArgs(configPath, additionalArgs));
 }

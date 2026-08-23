@@ -1,6 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, mock, test } from "bun:test";
 
-import { buildCheckArgs, parseArgs } from "#lib/check";
+import { buildCheckArgs, checkFormatting, parseArgs } from "#lib/check";
 
 describe("buildCheckArgs", () => {
 	test.each([
@@ -27,6 +27,38 @@ describe("buildCheckArgs", () => {
 	});
 
 	test("rejects an unterminated quote", () => {
-		expect(() => parseArgs("--excludes \"source files")).toThrow("Unterminated quote");
+		expect(() => parseArgs("--excludes \"source files")).toThrow(/^Unterminated quote in args input$/u);
 	});
+});
+
+describe("parseArgs", () => {
+	test.each(
+		[
+			{
+				name: "double-quoted whitespace",
+				input: "--config \"config files/dprint.json\"",
+				expected: ["--config", "config files/dprint.json"],
+			},
+			{
+				name: "escaped double quote",
+				input: "--pattern \"say \\\"hello\\\"\"",
+				expected: ["--pattern", "say \"hello\""],
+			},
+			{ name: "literal backslash", input: "--pattern \"src\\\\generated\"", expected: ["--pattern", "src\\generated"] },
+			{ name: "empty quoted argument", input: "--pattern \"\"", expected: ["--pattern", ""] },
+		] as const,
+	)("parses $name", ({ input, expected }) => {
+		expect(parseArgs(input)).toEqual([...expected]);
+	});
+});
+
+test("runs dprint check with the constructed argv", async () => {
+	const execute = mock(async () => 0);
+
+	await checkFormatting("/tools/dprint", "config files/dprint.json", "--allow-no-files", execute);
+	expect(execute).toHaveBeenCalledTimes(1);
+	expect(execute).toHaveBeenCalledWith(
+		"/tools/dprint",
+		["check", "--config", "config files/dprint.json", "--allow-no-files"],
+	);
 });

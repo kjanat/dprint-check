@@ -1,2 +1,3 @@
-bun.lock linguist-generated
-dist/**  linguist-generated -diff
+bun.lock                           linguist-generated
+dist/**                            linguist-generated -diff
+tests/fixtures/release-assets.json linguist-generated -diff

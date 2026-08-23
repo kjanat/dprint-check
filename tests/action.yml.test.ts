@@ -12,7 +12,7 @@ expectTypeOf(action.inputs.token.default).toEqualTypeOf<"${{ github.token }}">()
 
 describe("action metadata", () => {
 	test("uses Node.js 24 with an always-running post step", () => {
-		expect(action.runs).toMatchObject({
+		expect(action.runs).toEqual({
 			using: "node24",
 			main: "dist/main.mjs",
 			post: "dist/post.mjs",
@@ -20,8 +20,8 @@ describe("action metadata", () => {
 		});
 	});
 
-	test("keeps existing inputs", () => {
-		expect(Object.keys(action.inputs)).toEqual([
+	test("declares exactly the supported inputs", () => {
+		expect(action.inputs).toContainAllKeys([
 			"dprint-version",
 			"token",
 			"cache",
@@ -37,13 +37,15 @@ describe("action metadata", () => {
 			["token", "${{ github.token }}"],
 			["cache", "true"],
 			["run-check", "true"],
+			["config-path", ""],
+			["args", ""],
 		] as const,
 	)("defaults %s to %s", (input, expected) => {
 		expect(action.inputs[input].default).toBe(expected);
 	});
 
 	test("declares cache and installation outputs", () => {
-		expect(Object.keys(action.outputs).toSorted()).toEqual([
+		expect(action.outputs).toContainAllKeys([
 			"cache-hit",
 			"location",
 			"plugin-cache-hit",

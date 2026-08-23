@@ -5,6 +5,11 @@ import { execFileAsync } from "#lib/exec";
 
 const ATTEMPTS = 3;
 const TIMEOUT_MS = 60_000;
+type Execute = (file: string, args: string[], options: {
+	timeout: number;
+	cwd: string;
+	maxBuffer: number;
+}) => Promise<unknown>;
 
 function isTimeoutKill(error: unknown): boolean {
 	if (error === null || typeof error !== "object") return false;
@@ -13,15 +18,15 @@ function isTimeoutKill(error: unknown): boolean {
 	return killed && signal;
 }
 
-export async function warmupPlugins(binaryPath: string, configPath: string): Promise<boolean> {
+async function warmupConfig(binaryPath: string, configPath: string, execute: Execute): Promise<boolean> {
 	for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
 		try {
-			await execFileAsync(binaryPath, ["output-file-paths", "--config", configPath], {
+			await execute(binaryPath, ["output-file-paths", "--config", configPath], {
 				timeout: TIMEOUT_MS,
 				cwd: dirname(configPath),
 				maxBuffer: 64 * 1024 * 1024,
 			});
-			info("Plugin warmup complete");
+			info(`Plugin warmup complete: ${configPath}`);
 			return true;
 		} catch (error) {
 			if (!isTimeoutKill(error)) {
@@ -32,6 +37,17 @@ export async function warmupPlugins(binaryPath: string, configPath: string): Pro
 		}
 	}
 	throw new Error(`Plugin warmup kept hanging after ${ATTEMPTS} attempts`);
+}
+
+export async function warmupPlugins(
+	binaryPath: string,
+	configPaths: readonly string[],
+	execute: Execute = execFileAsync,
+): Promise<boolean> {
+	for (const configPath of configPaths) {
+		if (!await warmupConfig(binaryPath, configPath, execute)) return false;
+	}
+	return true;
 }
 
 function describe(error: unknown): string {

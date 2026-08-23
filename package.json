@@ -27,7 +27,6 @@
 		"detect-libc": "^2.1.2"
 	},
 	"devDependencies": {
-		"@actions/cache": "^6",
 		"@actions/core": "^3",
 		"@actions/exec": "^3",
 		"@actions/glob": "^0.7",
