@@ -1,18 +1,15 @@
 # yaml-language-server: $schema=https://www.schemastore.org/github-workflow.json
 ---
 name: Release
-run-name: >-
-  ${{ github.event_name == 'workflow_dispatch'
-    && format('Prepare {0} from {1}', inputs.version, github.sha)
-    || format('Finalize {0}', github.event.release.tag_name) }}
+run-name: ${{ case(github.event_name == 'workflow_dispatch', format('Prepare {0} from {1}', inputs.version, github.sha), format('Finalize {0}', github.event.release.tag_name)) }}
 on:
+  release: { types: [published] }
   workflow_dispatch:
     inputs:
       version:
         description: Stable semantic version to release (for example, v3.0.0)
         required: true
         type: string
-  release: { types: [published] }
 concurrency: { group: release, queue: single }
 permissions: { contents: read }
 env:
