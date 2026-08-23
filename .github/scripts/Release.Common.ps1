@@ -100,7 +100,9 @@ function Read-ReleaseChecksumEntry {
 		[string] $Manifest
 	)
 
-	$Manifest = $Manifest ?? (Get-ReleaseChecksumPath)
+	if ([string]::IsNullOrWhiteSpace($Manifest)) {
+		$Manifest = Get-ReleaseChecksumPath
+	}
 	$manifestPath = Join-Path $Root $Manifest
 	$lines = [IO.File]::ReadAllLines($manifestPath)
 	if ($lines.Count -eq 0) {

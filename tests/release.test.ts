@@ -65,6 +65,25 @@ $succeeded = Test-NativeCommand { pwsh -NoProfile -NonInteractive -Command 'exit
 		expect(output).toBe("False|0");
 	});
 
+	test("defaults checksum operations to SHA256SUMS", async () => {
+		const output = await invokePowerShell(`
+. '${commonScript}'
+$fixture = Join-Path ([IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+try {
+	[void][IO.Directory]::CreateDirectory((Join-Path $fixture 'dist'))
+	[IO.File]::WriteAllText((Join-Path $fixture 'dist/action.mjs'), 'bundle')
+	$hash = (Get-FileHash (Join-Path $fixture 'dist/action.mjs') -Algorithm SHA256).Hash.ToLowerInvariant()
+	[IO.File]::WriteAllText((Join-Path $fixture 'SHA256SUMS'), "$hash  dist/action.mjs\`n")
+	Assert-ReleaseChecksum -Root $fixture
+	Get-ReleasePath -Root $fixture | ConvertTo-Json -Compress
+}
+finally {
+	Remove-Item -Recurse -Force $fixture
+}
+`);
+		expect(JSON.parse(output)).toEqual(["SHA256SUMS", "dist/action.mjs"]);
+	});
+
 	test("renders release provenance and source changes before generated notes", async () => {
 		const output = await invokePowerShell(`
 . '${commonScript}'
