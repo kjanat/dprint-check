@@ -12,7 +12,7 @@ $defaultBranch = Get-RequiredEnvironmentVariable 'DEFAULT_BRANCH'
 $repository = Get-RequiredEnvironmentVariable 'GH_REPO'
 $serverUrl = Get-RequiredEnvironmentVariable 'GITHUB_SERVER_URL'
 $attestationUrl = Get-RequiredEnvironmentVariable 'ATTESTATION_URL'
-$null = Assert-StableReleaseVersion $version
+$releaseVersion = Assert-StableReleaseVersion $version
 Assert-ReleaseChecksum -Root candidate
 Assert-ReleaseDoesNotExist $version
 
@@ -100,20 +100,42 @@ $summaryPath = Get-RequiredEnvironmentVariable 'GITHUB_STEP_SUMMARY'
 $runNumber = Get-RequiredEnvironmentVariable 'GITHUB_RUN_NUMBER'
 $runId = Get-RequiredEnvironmentVariable 'GITHUB_RUN_ID'
 $releaseUrl = "$serverUrl/$repository/releases/tag/$version"
+$tagUrl = "$serverUrl/$repository/tree/$version"
 $editUrl = $release.html_url.Replace('/releases/tag/', '/releases/edit/')
+$major = "v$($releaseVersion.Major)"
+$minor = "$major.$($releaseVersion.Minor)"
+$releaseBadge = "https://img.shields.io/github/v/release/${repository}?include_prereleases&sort=semver&filter=${version}&display_name=release&style=flat-square"
+$tagBadge = "https://img.shields.io/github/v/tag/${repository}?include_prereleases&sort=semver&filter=${version}&style=flat-square"
 $summary = @"
-## $version is ready for review
+## Publish $version
 
-- Draft release: [Review and publish $version]($editUrl)
+> [!IMPORTANT]
+> **The Action is not published yet.** Preparation and verification succeeded; this existing draft is ready to publish.
+>
+> **Do not dispatch the Release workflow again.** Take this release out of draft by selecting **Publish release**. Publication triggers final verification, which moves `$major` and `$minor` only after every check passes.
+
+[![GitHub Release]($releaseBadge)]($releaseUrl) [![GitHub Tag]($tagBadge)]($tagUrl)
+
+### Publish in the browser
+
+[Review the prepared draft]($editUrl), then select **Publish release**.
+
+### Or publish with GitHub CLI
+
+~~~sh
+GH_REPO=$repository gh release view $version --web
+GH_REPO=$repository gh release edit $version --draft=false
+~~~
+
+### Verified release details
+
+- Draft release: [Review $version]($editUrl)
 - Published release: [$version]($releaseUrl) (available after publication)
 - Source commit: [$($sourceSha.Substring(0, 7))]($serverUrl/$repository/commit/$sourceSha)
 - Signed release commit: [$($releaseSha.Substring(0, 7))]($serverUrl/$repository/commit/$releaseSha)
-- Tagged Action tree: [$version]($serverUrl/$repository/tree/$version) (available after publication)
+- Tagged Action tree: [$version]($tagUrl) (available after publication)
 - Preparation run: [#$runNumber]($serverUrl/$repository/actions/runs/$runId)
-
 - Independent rebuild: byte-for-byte identical
 - Bundle provenance: [view attestation]($attestationUrl)
-
-Review the linked draft, then use **Publish release**. Do not dispatch this workflow again; publishing the draft triggers final verification.
 "@
 [IO.File]::AppendAllText($summaryPath, $summary, [Text.UTF8Encoding]::new($false))
