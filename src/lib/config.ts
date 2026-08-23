@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
-import { glob, readFile } from "node:fs/promises";
+import { createHash, randomUUID } from "node:crypto";
+import { glob, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { cwd, env } from "node:process";
 import { fileURLToPath, URL } from "node:url";
@@ -17,9 +17,18 @@ interface ConfigSource {
 }
 
 export interface ConfigGraph {
+	aliases: Map<string, string>;
 	hasRemote: boolean;
+	origins: Map<string, string>;
 	roots: string[];
+	rootSources: string[];
 	sources: ConfigSource[];
+}
+
+export interface PreparedConfigRoots {
+	cleanup: () => Promise<void>;
+	materialized: boolean;
+	roots: string[];
 }
 
 const workspacePath = () => env[ENVIRONMENT.githubWorkspace] ?? cwd();
@@ -92,6 +101,9 @@ const remoteUrl = (value: string): URL | undefined => {
 
 export const isRemoteConfig = (value: string): boolean => remoteUrl(value) !== undefined;
 
+export const parseConfigPaths = (input: string): string[] =>
+	input.split(/[\t\r\n|]+/u).map(value => value.trim()).filter(value => value !== "");
+
 const normalizeRoot = (value: string): string => {
 	if (isAbsolute(value)) return value;
 	const url = parseUrl(value);
@@ -106,9 +118,13 @@ const normalizeRoot = (value: string): string => {
 export const findConfigFiles = async (customPath?: string): Promise<string[]> => {
 	const workspace = workspacePath();
 	if (customPath !== undefined && customPath.trim() !== "") {
-		const normalized = normalizeRoot(customPath.trim());
-		if (isRemoteConfig(normalized)) return [normalized];
-		return (await Array.fromAsync(glob(normalized))).sort();
+		const matches: string[] = [];
+		for (const value of parseConfigPaths(customPath)) {
+			const normalized = normalizeRoot(value);
+			if (isRemoteConfig(normalized)) matches.push(normalized);
+			else matches.push(...(await Array.fromAsync(glob(normalized))).sort());
+		}
+		return [...new Set(matches)];
 	}
 
 	const matches = (await Array.fromAsync(glob(CONFIG_NAMES.map(name => join(workspace, "**", name)), {
@@ -125,7 +141,7 @@ export const findConfigFiles = async (customPath?: string): Promise<string[]> =>
 	return matches;
 };
 
-const configExtends = (content: string, source: string): string[] => {
+const configObject = (content: string, source: string): Record<string, unknown> => {
 	let config: unknown;
 	try {
 		config = JSON.parse(normalizeJsonc(content.replace(/^\uFEFF/u, ""), source));
@@ -138,8 +154,11 @@ const configExtends = (content: string, source: string): string[] => {
 	if (config === null || typeof config !== "object" || Array.isArray(config)) {
 		throw new Error(`Failed parsing dprint config ${source}: expected an object`);
 	}
+	return config as Record<string, unknown>;
+};
 
-	const value = (config as { extends?: unknown }).extends;
+const configExtends = (content: string, source: string): string[] => {
+	const value = configObject(content, source).extends;
 	if (value === undefined) return [];
 	if (typeof value === "string") return [value];
 	if (Array.isArray(value) && value.every(item => typeof item === "string")) return value;
@@ -209,6 +228,8 @@ export const resolveConfigGraph = async (
 	options: RetryTransportOptions = {},
 ): Promise<ConfigGraph> => {
 	const loaded = new Map<string, Promise<ConfigSource>>();
+	const aliases = new Map<string, string>();
+	const origins = new Map<string, string>();
 	const sources = new Map<string, ConfigSource>();
 	const resolved = new Set<string>();
 	const resolving = new Set<string>();
@@ -219,7 +240,10 @@ export const resolveConfigGraph = async (
 			pending = loadConfig(source, options);
 			loaded.set(source, pending);
 		}
-		return pending;
+		return pending.then(config => {
+			aliases.set(source, config.source);
+			return config;
+		});
 	};
 
 	const visit = async (config: ConfigSource, origin: string): Promise<void> => {
@@ -228,6 +252,7 @@ export const resolveConfigGraph = async (
 		if (resolving.has(stateKey)) throw new Error(`Circular dprint config extends detected at ${config.source}`);
 		resolving.add(stateKey);
 		sources.set(config.source, config);
+		if (!origins.has(config.source)) origins.set(config.source, origin);
 		for (const reference of configExtends(config.content, config.source)) {
 			const childSource = resolveConfigReference(reference, config.source, origin);
 			await visit(await load(childSource), origin);
@@ -237,15 +262,96 @@ export const resolveConfigGraph = async (
 	};
 
 	const normalizedRoots = roots.map(normalizeRoot);
+	const rootSources: string[] = [];
 	for (const root of normalizedRoots) {
 		const config = await load(root);
+		rootSources.push(config.source);
 		await visit(config, config.source);
 	}
 
 	return {
+		aliases,
 		hasRemote: [...sources.values()].some(source => source.remote),
+		origins,
 		roots: normalizedRoots,
+		rootSources,
 		sources: [...sources.values()],
+	};
+};
+
+const withoutChecksum = (value: string): string => value.replace(/@[\da-f]{64}$/iu, "");
+
+const isWasmPlugin = (value: string): boolean => {
+	const source = withoutChecksum(value);
+	const url = parseUrl(source);
+	const path = url === undefined ? source : url.pathname;
+	return path.toLowerCase().endsWith(".wasm");
+};
+
+const needsLocalCompatibility = (source: ConfigSource): boolean => {
+	if (!source.remote) return false;
+	const config = configObject(source.content, source.source);
+	const plugins = config.plugins;
+	return source.content.includes("${configDir}") || source.content.includes("${originConfigDir}")
+		|| (Array.isArray(plugins) && plugins.some(plugin => typeof plugin === "string" && !isWasmPlugin(plugin)));
+};
+
+const absoluteRemotePlugin = (value: string, source: string): string => {
+	const plugin = withoutChecksum(value);
+	const checksum = value.slice(plugin.length);
+	return parseUrl(plugin) === undefined ? `${new URL(plugin, source).href}${checksum}` : value;
+};
+
+export const prepareConfigRoots = async (config: ConfigGraph): Promise<PreparedConfigRoots> => {
+	if (!config.sources.some(needsLocalCompatibility)) {
+		return { cleanup: async () => {}, materialized: false, roots: config.roots };
+	}
+
+	const generated = new Map(
+		config.sources.map(source => [
+			source.source,
+			join(source.remote ? workspacePath() : dirname(source.source), `.dprint-check-${randomUUID()}.json`),
+		]),
+	);
+	const paths = [...generated.values()];
+	const cleanup = async (): Promise<void> => {
+		await Promise.all(paths.map(path => rm(path, { force: true })));
+	};
+
+	try {
+		await Promise.all(config.sources.map(async source => {
+			const value = configObject(source.content, source.source);
+			const extendsValue = value.extends;
+			if (typeof extendsValue === "string" || Array.isArray(extendsValue)) {
+				const references = configExtends(source.content, source.source).map(reference => {
+					const resolved = resolveConfigReference(
+						reference,
+						source.source,
+						config.origins.get(source.source) ?? source.source,
+					);
+					const actual = config.aliases.get(resolved) ?? resolved;
+					return generated.get(actual) ?? actual;
+				});
+				value.extends = typeof extendsValue === "string" ? references[0] : references;
+			}
+			if (source.remote && Array.isArray(value.plugins)) {
+				value.plugins = value.plugins.map(plugin =>
+					typeof plugin === "string" ? absoluteRemotePlugin(plugin, source.source) : plugin
+				);
+			}
+			const path = generated.get(source.source);
+			if (path === undefined) throw new Error(`Missing generated path for dprint config ${source.source}`);
+			await writeFile(path, `${JSON.stringify(value, undefined, "\t")}\n`, { encoding: "utf8", flag: "wx" });
+		}));
+	} catch (error) {
+		await cleanup();
+		throw error;
+	}
+
+	return {
+		cleanup,
+		materialized: true,
+		roots: config.rootSources.map(root => generated.get(root) ?? root),
 	};
 };
 

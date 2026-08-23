@@ -13,7 +13,7 @@ inputs:
     required: false
     default: "${{ github.token }}"
   cache:
-    description: "Cache the dprint binary and compiled WASM plugins"
+    description: "Cache the dprint binary and plugin artifacts"
     required: false
     default: "true"
   install-only:
@@ -21,7 +21,7 @@ inputs:
     required: false
     default: "false"
   config-path:
-    description: "Specific dprint config path, glob, or remote HTTP(S) URL"
+    description: "dprint config path(s), glob(s), or remote HTTP(S) URL(s)"
     required: false
     default: ""
   annotations:
@@ -40,9 +40,9 @@ outputs:
   cache-hit:
     description: "Whether the dprint binary was restored from cache"
   plugin-cache-hit:
-    description: "Whether the compiled WASM plugin cache was restored with an exact key"
+    description: "Whether the plugin cache was restored with an exact key"
   plugin-cache-key:
-    description: "Cache key used for compiled WASM plugins"
+    description: "Cache key used for dprint plugins"
 runs:
   using: "node24"
   main: "dist/main.mjs"

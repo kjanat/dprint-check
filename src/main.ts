@@ -15,8 +15,15 @@ import {
 	warning,
 } from "#lib/actions";
 import { isCacheAvailable, restoreCache } from "#lib/cache";
-import { checkFormatting, isFormattingFailure } from "#lib/check";
-import { computeCacheKey, findConfigFiles, resolveConfigGraph } from "#lib/config";
+import { checkConfigurations, isFormattingFailure } from "#lib/check";
+import {
+	computeCacheKey,
+	type ConfigGraph,
+	findConfigFiles,
+	prepareConfigRoots,
+	type PreparedConfigRoots,
+	resolveConfigGraph,
+} from "#lib/config";
 import { ACTION_INPUT, ACTION_OUTPUT, ACTION_STATE, ACTION_VALUE, DPRINT, ENVIRONMENT } from "#lib/contracts";
 import { describeError } from "#lib/error";
 import { installDprint } from "#lib/install";
@@ -29,16 +36,15 @@ const restorePluginCache = async (
 	version: string,
 	platformKey: string,
 	binaryPath: string,
-	configPathInput: string,
+	config: ConfigGraph | undefined,
+	configRoots: readonly string[],
 ): Promise<void> => {
-	const configRoots = await findConfigFiles(configPathInput || undefined);
 	debug(`Discovered ${configRoots.length} dprint config root(s)`);
-	if (configRoots.length === 0) {
+	if (config === undefined) {
 		info("No dprint config found; skipping plugin cache");
 		return;
 	}
 
-	const config = await resolveConfigGraph(configRoots);
 	info(`Using ${config.roots.length} config root(s) and ${config.sources.length} resolved config source(s)`);
 	const { primaryKey, restoreKeys } = computeCacheKey(config, version, platformKey);
 	debug(`Plugin cache primary key: ${primaryKey}`);
@@ -72,6 +78,7 @@ const restorePluginCache = async (
 };
 
 const run = async (): Promise<void> => {
+	let preparedConfig: PreparedConfigRoots | undefined;
 	try {
 		const versionInput = getInput(ACTION_INPUT.dprintVersion) || DPRINT.latestVersion;
 		const token = getInput(ACTION_INPUT.token);
@@ -97,17 +104,44 @@ const run = async (): Promise<void> => {
 		setOutput(ACTION_OUTPUT.pluginCacheKey, "");
 
 		const { version, location, platformKey } = await installDprint(versionInput, cacheEnabled, token);
-		if (cacheEnabled && isCacheAvailable()) {
-			await restorePluginCache(cacheDir, version, platformKey, location, configPathInput);
+		const cacheAvailable = cacheEnabled && isCacheAvailable();
+		let config: ConfigGraph | undefined;
+		if (!installOnly || cacheAvailable) {
+			const configRoots = await findConfigFiles(configPathInput || undefined);
+			if (configPathInput !== "" && configRoots.length === 0) {
+				throw new Error("config-path did not match any dprint configuration");
+			}
+			if (configRoots.length !== 0) {
+				config = await resolveConfigGraph(configRoots);
+				preparedConfig = await prepareConfigRoots(config);
+				if (preparedConfig.materialized) {
+					info("Materialized remote dprint configuration locally for process-plugin compatibility");
+				}
+			}
+		}
+
+		if (cacheAvailable) {
+			await restorePluginCache(cacheDir, version, platformKey, location, config, preparedConfig?.roots ?? []);
 		} else if (cacheEnabled) warning("GitHub Actions cache is unavailable; skipping plugin cache");
 
 		if (!installOnly) {
 			debug("Running dprint check");
-			await checkFormatting(location, configPathInput, additionalArgs, { annotations: annotationsEnabled });
+			const checkRoots = configPathInput === "" && preparedConfig?.materialized !== true
+				? [""]
+				: (preparedConfig?.roots ?? []);
+			await checkConfigurations(location, checkRoots, additionalArgs, { annotations: annotationsEnabled });
 		} else info("dprint installed; check skipped because install-only is true");
 	} catch (error) {
 		if (isFormattingFailure(error)) process.exitCode = 1;
 		else setFailed(describeError(error));
+	} finally {
+		if (preparedConfig !== undefined) {
+			try {
+				await preparedConfig.cleanup();
+			} catch (error) {
+				warning(`Failed cleaning generated dprint configuration: ${describeError(error)}`);
+			}
+		}
 	}
 };
 

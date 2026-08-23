@@ -1,7 +1,14 @@
 import { describe, expect, mock, spyOn, test } from "bun:test";
 import { resolve } from "node:path";
 
-import { buildCheckArgs, checkFormatting, isFormattingFailure, parseArgs, parseCheckAnnotations } from "#lib/check";
+import {
+	buildCheckArgs,
+	checkConfigurations,
+	checkFormatting,
+	isFormattingFailure,
+	parseArgs,
+	parseCheckAnnotations,
+} from "#lib/check";
 import { DPRINT } from "#lib/contracts";
 import { TEST_DPRINT_BINARY } from "#test/helpers";
 
@@ -110,6 +117,26 @@ test("runs dprint check with the constructed argv and replays output", async () 
 		stdout.mockRestore();
 		stderr.mockRestore();
 	}
+});
+
+test("checks every explicit configuration", async () => {
+	const execute = mock(async () => ({}));
+
+	await checkConfigurations(TEST_DPRINT_BINARY, ["first.json", "https://example.com/second.json"], "", { execute });
+
+	expect(execute).toHaveBeenCalledTimes(2);
+	expect(execute).toHaveBeenNthCalledWith(
+		1,
+		TEST_DPRINT_BINARY,
+		[DPRINT.command.check, DPRINT.command.config, "first.json"],
+		{ maxBuffer: 64 * 1024 * 1024 },
+	);
+	expect(execute).toHaveBeenNthCalledWith(
+		2,
+		TEST_DPRINT_BINARY,
+		[DPRINT.command.check, DPRINT.command.config, "https://example.com/second.json"],
+		{ maxBuffer: 64 * 1024 * 1024 },
+	);
 });
 
 test("annotates formatting failures and preserves the rejected error", async () => {

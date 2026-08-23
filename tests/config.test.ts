@@ -1,8 +1,14 @@
 import { describe, expect, mock, test } from "bun:test";
-import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 
-import { computeCacheKey, findConfigFiles, resolveConfigGraph } from "#lib/config";
+import {
+	computeCacheKey,
+	findConfigFiles,
+	parseConfigPaths,
+	prepareConfigRoots,
+	resolveConfigGraph,
+} from "#lib/config";
 import { DPRINT, ENVIRONMENT } from "#lib/contracts";
 import { TEST_DPRINT_VERSION, TEST_GNU_PLATFORM, useTestContext } from "#test/helpers";
 
@@ -20,6 +26,18 @@ const fetchConfigs = (configs: Readonly<Record<string, string>>) =>
 		const content = configs[url];
 		return content === undefined ? new Response("not found", { status: 404 }) : new Response(content);
 	});
+
+test("parses config locators separated by lines, tabs, or pipes", () => {
+	expect(parseConfigPaths([
+		"https://example.com/configs/first.json",
+		"https://example.com/configs/with,comma;semicolon.json | configs/*.json\tconfig/local.json",
+	].join("\n"))).toEqual([
+		"https://example.com/configs/first.json",
+		"https://example.com/configs/with,comma;semicolon.json",
+		"configs/*.json",
+		"config/local.json",
+	]);
+});
 
 describe("findConfigFiles", () => {
 	test("prioritizes the root config and includes nested configs", async () => {
@@ -65,6 +83,16 @@ describe("findConfigFiles", () => {
 		const url = "https://example.com/configs/dprint.json";
 
 		expect(await findConfigFiles(url)).toEqual([url]);
+	});
+
+	test("expands multiple local and remote config locators", async () => {
+		const root = await workspace();
+		const localConfigs = [join(root, "configs", "first.json"), join(root, "configs", "second.json")];
+		const remoteConfig = "https://example.com/configs/remote.json";
+		await mkdir(join(root, "configs"), { recursive: true });
+		await Promise.all(localConfigs.map(config => writeFile(config, "{}")));
+
+		expect(await findConfigFiles(`configs/*.json|${remoteConfig}`)).toEqual([...localConfigs, remoteConfig]);
 	});
 });
 
@@ -275,4 +303,41 @@ describe("computeCacheKey", () => {
 			computeCacheKey(backwards, TEST_DPRINT_VERSION, TEST_GNU_PLATFORM),
 		);
 	});
+});
+
+test("materializes and cleans a remote process-plugin graph in the workspace", async () => {
+	const root = await workspace();
+	const rootConfig = "https://example.com/configs/dprint.json";
+	const processConfig = "https://example.com/configs/process.json";
+	const processPlugin = `https://plugins.dprint.dev/exec-0.7.3.json@${"a".repeat(64)}`;
+	const graph = await resolveConfigGraph([rootConfig], {
+		fetch: fetchConfigs({
+			[rootConfig]: `{ "extends": "./process.json" }`,
+			[processConfig]: `{ "exec": { "cwd": "\${configDir}" }, "plugins": ["${processPlugin}"] }`,
+		}),
+	});
+
+	const prepared = await prepareConfigRoots(graph);
+	const generatedPaths: string[] = [];
+	try {
+		expect(prepared.materialized).toBeTrue();
+		expect(prepared.roots).toHaveLength(1);
+		const preparedRoot = prepared.roots[0];
+		expect(preparedRoot).toBeString();
+		if (preparedRoot === undefined) throw new Error("Missing prepared config root");
+		generatedPaths.push(preparedRoot);
+		expect(dirname(preparedRoot)).toBe(root);
+		const rootContents = JSON.parse(await readFile(preparedRoot, "utf8")) as { extends: string };
+		generatedPaths.push(rootContents.extends);
+		expect(dirname(rootContents.extends)).toBe(root);
+		const processContents = JSON.parse(await readFile(rootContents.extends, "utf8")) as {
+			exec: { cwd: string };
+			plugins: string[];
+		};
+		expect(processContents.exec.cwd).toBe("${configDir}");
+		expect(processContents.plugins).toEqual([processPlugin]);
+	} finally {
+		await prepared.cleanup();
+	}
+	for (const path of generatedPaths) expect(await Bun.file(path).exists()).toBeFalse();
 });

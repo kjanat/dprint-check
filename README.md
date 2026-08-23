@@ -1,6 +1,6 @@
 # dprint check action
 
-This action installs dprint, caches the binary and compiled WASM plugins, then runs `dprint check`.
+This action installs dprint, caches the binary and plugin artifacts, then runs `dprint check`.
 Formatting failures are emitted as GitHub file annotations while retaining dprint's diff in the job log.
 Set `annotations` to `false` to retain only the job-log output.
 
@@ -65,8 +65,22 @@ URL:
     config-path: https://raw.githubusercontent.com/example/configs/HEAD/dprint.json
 ```
 
+To check multiple explicit configurations, separate paths, globs, or URLs with line breaks, tabs, or `|`. Each
+resolved configuration is checked separately:
+
+```yml
+- uses: dprint/check@v3
+  with:
+    config-path: |
+      https://raw.githubusercontent.com/example1/configs/HEAD/dprint.json
+      https://raw.githubusercontent.com/example2/configs/HEAD/dprint.json
+```
+
 The cache key follows `extends` recursively, including string or array values and relative links between local or
-remote configs. Mutable remote configs are fetched before cache selection and refreshed before plugin warmup.
+remote configs. Mutable remote configs are fetched before cache selection and refreshed before plugin warmup. When a
+remote configuration graph contains a process plugin or a local-directory template, the action materializes that graph
+in the workspace before warmup and checking. This deliberately treats that remote configuration as locally trusted,
+allowing process plugins that dprint otherwise ignores for remote configurations.
 
 ### Args
 
@@ -90,9 +104,9 @@ E.g. to only check changed files:
 | ---------------- | --------------- | --------------------------------------------- |
 | `dprint-version` | latest          | dprint release to install                     |
 | `token`          | `github.token`  | Token used to query GitHub release metadata   |
-| `cache`          | `true`          | Cache the binary and compiled WASM plugins    |
+| `cache`          | `true`          | Cache the binary and plugin artifacts         |
 | `install-only`   | `false`         | Install without running `dprint check`        |
-| `config-path`    | auto-discovered | Config path, glob, or remote HTTP(S) URL      |
+| `config-path`    | auto-discovered | Config path(s), glob(s), or HTTP(S) URL(s)    |
 | `annotations`    | `true`          | Emit annotations for formatting failures      |
 | `args`           |                 | Additional arguments passed to `dprint check` |
 

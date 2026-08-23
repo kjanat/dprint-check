@@ -181,3 +181,21 @@ export const checkFormatting = async (
 		throw error;
 	}
 };
+
+export const checkConfigurations = async (
+	binaryPath: string,
+	configPaths: readonly string[],
+	additionalArgs: string,
+	options: CheckOptions = {},
+): Promise<void> => {
+	let formattingFailure: unknown;
+	for (const configPath of configPaths) {
+		try {
+			await checkFormatting(binaryPath, configPath, additionalArgs, options);
+		} catch (error) {
+			if (!isFormattingFailure(error)) throw error;
+			formattingFailure ??= error;
+		}
+	}
+	if (formattingFailure !== undefined) throw formattingFailure;
+};
