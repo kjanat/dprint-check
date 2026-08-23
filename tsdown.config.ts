@@ -12,7 +12,8 @@ let completedBuilds = 0;
 
 const writeReleaseChecksum: TsdownHooks["build:done"] = async ({ chunks }) => {
 	for (const chunk of chunks) {
-		emittedBundlePaths.add(relative(process.cwd(), resolve(chunk.outDir, chunk.fileName)).replaceAll("\\", "/"));
+		const outputPath = resolve(import.meta.dir, chunk.outDir, chunk.fileName);
+		emittedBundlePaths.add(relative(import.meta.dir, outputPath).replaceAll("\\", "/"));
 	}
 	completedBuilds++;
 	if (completedBuilds < sourceEntrypoints.length) return;
@@ -27,10 +28,10 @@ const writeReleaseChecksum: TsdownHooks["build:done"] = async ({ chunks }) => {
 		);
 	}
 	const lines = await Promise.all(actionEntrypoints.map(async path => {
-		const hash = createHash("sha256").update(await readFile(path)).digest("hex");
+		const hash = createHash("sha256").update(await readFile(resolve(import.meta.dir, path))).digest("hex");
 		return `${hash}  ${path}`;
 	}));
-	await writeFile("SHA256SUMS", `${lines.join("\n")}\n`);
+	await writeFile(resolve(import.meta.dir, "SHA256SUMS"), `${lines.join("\n")}\n`);
 };
 
 const configs = sourceEntrypoints.map(entry => ({

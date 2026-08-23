@@ -278,6 +278,15 @@ function Get-ReleaseHistory {
 	return @($pages | ForEach-Object { $_ })
 }
 
+function Assert-ReleaseDoesNotExist([string] $Version) {
+	$existing = @(Get-ReleaseHistory | Where-Object { $_.tag_name -eq $Version })
+	if ($existing.Count -eq 0) {
+		return
+	}
+	$locations = @($existing | ForEach-Object html_url) -join ', '
+	Write-ReleaseError "Release $Version already exists: $locations"
+}
+
 function Update-FloatingTag {
 	[CmdletBinding(SupportsShouldProcess)]
 	param(

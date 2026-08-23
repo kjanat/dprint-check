@@ -145,4 +145,24 @@ $ErrorActionPreference = 'Stop'
 `);
 		expect(JSON.parse(output)).toEqual({ previous: null, latest: null });
 	});
+
+	test("treats draft releases as existing versions", async () => {
+		const failure = await invokePowerShell(`
+. '${commonScript}'
+function Get-ReleaseHistory {
+	return @([pscustomobject]@{
+		tag_name = 'v3.0.1'
+		draft = $true
+		html_url = 'https://github.com/dprint/check/releases/tag/untagged-draft'
+	})
+}
+Assert-ReleaseDoesNotExist 'v3.0.1'
+`).then(
+			() => undefined,
+			error => error as Error & { stdout: string },
+		);
+		expect(failure).toBeInstanceOf(Error);
+		expect(failure?.message).toContain("Release v3.0.1 already exists");
+		expect(failure?.stdout).toContain("untagged-draft");
+	});
 });

@@ -25,9 +25,7 @@ if (-not $commit.commit.verification.verified) {
 	Write-ReleaseError "Source commit $sourceSha is not verified"
 }
 
-if (Test-NativeCommand { gh release view $version }) {
-	Write-ReleaseError "Release $version already exists"
-}
+Assert-ReleaseDoesNotExist $version
 if (Test-NativeCommand { git ls-remote --exit-code --tags origin "refs/tags/$version" }) {
 	Write-ReleaseError "Tag $version already exists"
 }

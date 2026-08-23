@@ -14,6 +14,7 @@ $serverUrl = Get-RequiredEnvironmentVariable 'GITHUB_SERVER_URL'
 $attestationUrl = Get-RequiredEnvironmentVariable 'ATTESTATION_URL'
 $null = Assert-StableReleaseVersion $version
 Assert-ReleaseChecksum -Root candidate
+Assert-ReleaseDoesNotExist $version
 
 $releasePaths = @(Get-ReleasePath -Root candidate)
 $sourceTree = (Invoke-GitHubApi -Path "repos/{owner}/{repo}/git/commits/$sourceSha").tree.sha
@@ -70,13 +71,22 @@ $releaseArguments += @(
 )
 $releaseArguments += $releaseOptions
 $releaseArguments += '--draft'
-gh @releaseArguments
+Assert-ReleaseDoesNotExist $version
+$releaseOutput = @(& gh @releaseArguments)
+$createdReleaseUrl = ([string] ($releaseOutput | Select-Object -Last 1)).Trim()
 
-$release = ConvertFrom-NativeJson (gh release view $version --json 'assets,isDraft,tagName,targetCommitish,url')
-if (-not $release.isDraft) { Write-ReleaseError "Release $version is not a draft" }
-if ($release.tagName -ne $version) { Write-ReleaseError "Draft tag is $($release.tagName), expected $version" }
-if ($release.targetCommitish -ne $releaseSha) {
-	Write-ReleaseError "Draft targets $($release.targetCommitish), expected $releaseSha"
+if ([string]::IsNullOrWhiteSpace($createdReleaseUrl)) {
+	Write-ReleaseError "GitHub CLI did not return the created draft URL"
+}
+$matchingReleases = @(Get-ReleaseHistory | Where-Object { $_.html_url -eq $createdReleaseUrl })
+if ($matchingReleases.Count -ne 1) {
+	Write-ReleaseError "Could not identify the created draft: $createdReleaseUrl"
+}
+$release = $matchingReleases[0]
+if (-not $release.draft) { Write-ReleaseError "Release $version is not a draft" }
+if ($release.tag_name -ne $version) { Write-ReleaseError "Draft tag is $($release.tag_name), expected $version" }
+if ($release.target_commitish -ne $releaseSha) {
+	Write-ReleaseError "Draft targets $($release.target_commitish), expected $releaseSha"
 }
 $assetNames = @($release.assets | ForEach-Object name | Sort-Object)
 $expectedAssets = @(Get-ReleaseAssetName -Path $releasePaths | Sort-Object)
@@ -85,37 +95,26 @@ if (Compare-Object $expectedAssets $assetNames) {
 }
 
 Add-GitHubOutput 'release-sha' $releaseSha
-Add-GitHubOutput 'release-url' $release.url
+Add-GitHubOutput 'release-url' $release.html_url
 
 $summaryPath = Get-RequiredEnvironmentVariable 'GITHUB_STEP_SUMMARY'
 $runNumber = Get-RequiredEnvironmentVariable 'GITHUB_RUN_NUMBER'
 $runId = Get-RequiredEnvironmentVariable 'GITHUB_RUN_ID'
 $releaseUrl = "$serverUrl/$repository/releases/tag/$version"
+$editUrl = $release.html_url.Replace('/releases/tag/', '/releases/edit/')
 $summary = @"
 ## $version is ready for review
 
-- Draft release: [Review $version]($releaseUrl)
+- Draft release: [Review and publish $version]($editUrl)
+- Published release: [$version]($releaseUrl) (available after publication)
 - Source commit: [$($sourceSha.Substring(0, 7))]($serverUrl/$repository/commit/$sourceSha)
 - Signed release commit: [$($releaseSha.Substring(0, 7))]($serverUrl/$repository/commit/$releaseSha)
 - Tagged Action tree: [$version]($serverUrl/$repository/tree/$version) (available after publication)
 - Preparation run: [#$runNumber]($serverUrl/$repository/actions/runs/$runId)
-- Release workflow: [Open dispatch page]($serverUrl/$repository/actions/workflows/release.yml)
-
-### Dispatch input
-
-~~~text
-$version
-~~~
-
-Or prepare it with GitHub CLI:
-
-~~~sh
-gh workflow run release.yml -R $repository --ref $defaultBranch -f version=$version
-~~~
 
 - Independent rebuild: byte-for-byte identical
 - Bundle provenance: [view attestation]($attestationUrl)
 
-Publish the draft only after immutable releases are enabled.
+Review the linked draft, then use **Publish release**. Do not dispatch this workflow again; publishing the draft triggers final verification.
 "@
 [IO.File]::AppendAllText($summaryPath, $summary, [Text.UTF8Encoding]::new($false))

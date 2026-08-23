@@ -86,7 +86,8 @@ See GitHub's documentation for [immutable releases], [artifact attestations],
    ```
 
    This workflow dispatch is the only supported way to prepare a release. It
-   creates a draft but does not publish it.
+   creates a draft but does not publish it. Dispatch each version only once;
+   an existing draft or release with that version blocks preparation.
 4. Wait for the workflow to create the draft release. It builds and attests the
    bundle, independently rebuilds it, and creates a signed release commit whose
    only changes from the source commit are:
@@ -96,11 +97,12 @@ See GitHub's documentation for [immutable releases], [artifact attestations],
    dist/<every bundle path listed in SHA256SUMS>
    ```
 
-5. Review the workflow summary and draft. Confirm that `SHA256SUMS` and every
+5. Follow the workflow summary's **Review and publish** link. Confirm that `SHA256SUMS` and every
    bundle named by it are attached. Do not replace them or change the target
    commit. Confirm release immutability is enabled, then publish the draft
-   through GitHub's release UI. Publishing it automatically triggers the final
-   verification phase of the `Release` workflow.
+   through GitHub's release UI. Do not dispatch the workflow again. Publishing
+   the draft automatically triggers the final verification phase of the
+   `Release` workflow.
 6. Wait for the release-triggered verification job. It verifies the immutable
    release, signed single-parent release commit, changed paths, checksums,
    provenance, independent rebuild, and published checksum asset before moving
@@ -113,9 +115,9 @@ See GitHub's documentation for [immutable releases], [artifact attestations],
    ```
 
 Do not create or move release tags manually. If draft preparation fails, inspect
-the failed job before deleting the draft and retrying. If post-publication
-verification fails, leave the floating tags unchanged, investigate the failure,
-and do not bypass the verification job.
+the failed job before retrying, and do not retry the same version while a draft
+exists. If post-publication verification fails, leave the floating tags
+unchanged, investigate the failure, and do not bypass the verification job.
 
 [immutable releases]: https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/establish-provenance-and-integrity/prevent-release-changes
 [artifact attestations]: https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations
