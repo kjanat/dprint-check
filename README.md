@@ -17,8 +17,8 @@ jobs:
 ```
 
 The cache is enabled by default. Its key includes the dprint version, runner target (including Linux libc), and the
-contents of every discovered dprint config. The action warms the plugins after a cache miss so the following dprint
-invocation does not compile them.
+contents of every root and inherited dprint config. The action warms the plugins after a cache miss so the following
+dprint invocation does not compile them.
 
 To disable caching:
 
@@ -54,12 +54,17 @@ dprint's published release history, this means versions before `0.14.0` cannot b
 
 ### Config path
 
-By default, dprint auto-discovers its configuration. To use a specific config:
+By default, dprint auto-discovers its configuration. `config-path` also accepts a local path, glob, or remote HTTP(S)
+URL:
 
 ```yml
 - uses: dprint/check@v3
-  with: { config-path: dprint-ci.json }
+  with:
+    config-path: https://raw.githubusercontent.com/example/configs/HEAD/dprint.json
 ```
+
+The cache key follows `extends` recursively, including string or array values and relative links between local or
+remote configs. Mutable remote configs are fetched before cache selection and refreshed before plugin warmup.
 
 ### Args
 
@@ -85,7 +90,7 @@ E.g. to only check changed files:
 | `token`          | `github.token`  | Token used to query GitHub release metadata   |
 | `cache`          | `true`          | Cache the binary and compiled WASM plugins    |
 | `install-only`   | `false`         | Install without running `dprint check`        |
-| `config-path`    | auto-discovered | Configuration passed to dprint                |
+| `config-path`    | auto-discovered | Config path, glob, or remote HTTP(S) URL      |
 | `args`           |                 | Additional arguments passed to `dprint check` |
 
 ## Outputs

@@ -1,7 +1,9 @@
-import { DPRINT } from "#lib/contracts";
+import { DPRINT, ENVIRONMENT } from "#lib/contracts";
 import { WARMUP_ATTEMPTS, WARMUP_MAX_BUFFER, WARMUP_TIMEOUT_MS, warmupPlugins } from "#lib/warmup";
-import { TEST_DPRINT_BINARY } from "#test/helpers";
+import { TEST_DPRINT_BINARY, useTestContext } from "#test/helpers";
 import { expect, mock, test } from "bun:test";
+
+const context = useTestContext();
 
 test("warms every discovered config sequentially", async () => {
 	const configs = ["/workspace/dprint.json", "/workspace/packages/example/dprint.jsonc"];
@@ -41,6 +43,24 @@ test("does nothing when no configs are discovered", async () => {
 
 	expect(await warmupPlugins(TEST_DPRINT_BINARY, [], execute)).toBeTrue();
 	expect(execute).not.toHaveBeenCalled();
+});
+
+test("warms a remote config from the workspace", async () => {
+	const workspace = "/workspace";
+	const config = "https://example.com/configs/dprint.json";
+	context.setEnvironment(ENVIRONMENT.githubWorkspace, workspace);
+	const execute = mock(async () => {});
+
+	expect(await warmupPlugins(TEST_DPRINT_BINARY, [config], execute)).toBeTrue();
+	expect(execute).toHaveBeenCalledWith(
+		TEST_DPRINT_BINARY,
+		[DPRINT.command.warmup, DPRINT.command.config, config],
+		{
+			timeout: WARMUP_TIMEOUT_MS,
+			cwd: workspace,
+			maxBuffer: WARMUP_MAX_BUFFER,
+		},
+	);
 });
 
 test("stops after a non-timeout warmup failure", async () => {

@@ -1,3 +1,4 @@
+import { rm } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { env } from "node:process";
@@ -15,7 +16,7 @@ import {
 } from "#lib/actions";
 import { isCacheAvailable, restoreCache } from "#lib/cache";
 import { checkFormatting } from "#lib/check";
-import { computeCacheKey, findConfigFiles } from "#lib/config";
+import { computeCacheKey, findConfigFiles, resolveConfigGraph } from "#lib/config";
 import { ACTION_INPUT, ACTION_OUTPUT, ACTION_STATE, ACTION_VALUE, DPRINT, ENVIRONMENT } from "#lib/contracts";
 import { describeError } from "#lib/error";
 import { installDprint } from "#lib/install";
@@ -30,15 +31,16 @@ const restorePluginCache = async (
 	binaryPath: string,
 	configPathInput: string,
 ): Promise<void> => {
-	const configPaths = await findConfigFiles(configPathInput || undefined);
-	debug(`Discovered ${configPaths.length} dprint config file(s)`);
-	if (configPaths.length === 0) {
+	const configRoots = await findConfigFiles(configPathInput || undefined);
+	debug(`Discovered ${configRoots.length} dprint config root(s)`);
+	if (configRoots.length === 0) {
 		info("No dprint config found; skipping plugin cache");
 		return;
 	}
 
-	info(`Config files in plugin cache key: ${configPaths.join(", ")}`);
-	const { primaryKey, restoreKeys } = computeCacheKey(configPaths, version, platformKey);
+	const config = await resolveConfigGraph(configRoots);
+	info(`Using ${config.roots.length} config root(s) and ${config.sources.length} resolved config source(s)`);
+	const { primaryKey, restoreKeys } = computeCacheKey(config, version, platformKey);
 	debug(`Plugin cache primary key: ${primaryKey}`);
 	debug(`Plugin cache restore keys: ${restoreKeys.join(", ")}`);
 	saveState(ACTION_STATE.pluginCacheKey, primaryKey);
@@ -62,7 +64,11 @@ const restorePluginCache = async (
 		return;
 	}
 
-	if (await warmupPlugins(binaryPath, configPaths)) saveState(ACTION_STATE.pluginCacheReady, ACTION_VALUE.true);
+	if (config.hasRemote) {
+		await rm(join(cacheDir, DPRINT.remoteCacheDirectory), { recursive: true, force: true });
+		debug("Cleared restored remote files before plugin warmup");
+	}
+	if (await warmupPlugins(binaryPath, config.roots)) saveState(ACTION_STATE.pluginCacheReady, ACTION_VALUE.true);
 };
 
 const run = async (): Promise<void> => {

@@ -21,7 +21,7 @@ inputs:
     required: false
     default: "false"
   config-path:
-    description: "Specific dprint config to use (ex. dprint.json)"
+    description: "Specific dprint config path, glob, or remote HTTP(S) URL"
     required: false
     default: ""
   args:

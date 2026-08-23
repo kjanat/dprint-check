@@ -57,6 +57,7 @@ export const DPRINT = {
 	latestVersion: "latest",
 	name: "dprint",
 	pluginCacheVersion: 2,
+	remoteCacheDirectory: "remote",
 	sha256Algorithm: "sha256",
 } as const;
 

@@ -1,7 +1,9 @@
 import { dirname } from "node:path";
+import { cwd, env } from "node:process";
 
 import { info, warning } from "#lib/actions";
-import { DPRINT } from "#lib/contracts";
+import { isRemoteConfig } from "#lib/config";
+import { DPRINT, ENVIRONMENT } from "#lib/contracts";
 import { describeError } from "#lib/error";
 import { execFileAsync } from "#lib/exec";
 
@@ -26,7 +28,7 @@ const warmupConfig = async (binaryPath: string, configPath: string, execute: Exe
 		try {
 			await execute(binaryPath, [DPRINT.command.warmup, DPRINT.command.config, configPath], {
 				timeout: WARMUP_TIMEOUT_MS,
-				cwd: dirname(configPath),
+				cwd: isRemoteConfig(configPath) ? (env[ENVIRONMENT.githubWorkspace] ?? cwd()) : dirname(configPath),
 				maxBuffer: WARMUP_MAX_BUFFER,
 			});
 			info(`Plugin warmup complete: ${configPath}`);

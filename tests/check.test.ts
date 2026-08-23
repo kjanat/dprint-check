@@ -19,6 +19,12 @@ describe("buildCheckArgs", () => {
 			expected: [DPRINT.command.check, DPRINT.command.config, "config files/dprint.json"],
 		},
 		{
+			name: "passes a remote config URL unchanged",
+			configPath: "https://example.com/configs/dprint.json",
+			additionalArgs: "",
+			expected: [DPRINT.command.check, DPRINT.command.config, "https://example.com/configs/dprint.json"],
+		},
+		{
 			name: "parses quoted arguments without invoking a shell",
 			configPath: "",
 			additionalArgs: "--allow-no-files 'source files/**/*.ts'",
