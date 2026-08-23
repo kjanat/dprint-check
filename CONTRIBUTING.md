@@ -6,8 +6,8 @@ Install the locked dependencies with Bun 1.4.0, then run the same checks used by
 
 ```sh
 bun install --frozen-lockfile
-bun run check
 bun run build
+bun run check
 ```
 
 The generated `dist/` directory is intentionally ignored. Do not commit it to
@@ -22,8 +22,8 @@ To update the repository's pinned Bun version:
 bun upgrade --stable
 bun pm pkg set "packageManager=bun@$(bun --version)"
 bun install
-bun run check
 bun run build
+bun run check
 ```
 
 ## Release references

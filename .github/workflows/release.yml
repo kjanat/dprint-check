@@ -75,8 +75,8 @@ jobs:
             exit 1
           fi
       - run: bun install --frozen-lockfile
-      - run: bun run check
       - run: bun run build
+      - run: bun run check
       - name: Hash release bundle
         run: sha256sum dist/main.mjs dist/post.mjs > SHA256SUMS
       - name: Attest release bundle
