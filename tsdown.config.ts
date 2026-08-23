@@ -45,7 +45,7 @@ const configs = sourceEntrypoints.map(entry => ({
 	},
 	treeshake: true,
 	deps: {
-		alwaysBundle: [/.*/],
+		alwaysBundle: ["detect-libc"],
 		onlyBundle: false,
 		onlyImport: [],
 	},
