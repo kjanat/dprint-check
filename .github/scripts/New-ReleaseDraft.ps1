@@ -78,11 +78,10 @@ $createdReleaseUrl = ([string] ($releaseOutput | Select-Object -Last 1)).Trim()
 if ([string]::IsNullOrWhiteSpace($createdReleaseUrl)) {
 	Write-ReleaseError "GitHub CLI did not return the created draft URL"
 }
-$matchingReleases = @(Get-ReleaseHistory | Where-Object { $_.html_url -eq $createdReleaseUrl })
-if ($matchingReleases.Count -ne 1) {
+$release = Wait-ReleaseByUrl $createdReleaseUrl
+if ($null -eq $release) {
 	Write-ReleaseError "Could not identify the created draft: $createdReleaseUrl"
 }
-$release = $matchingReleases[0]
 if (-not $release.draft) { Write-ReleaseError "Release $version is not a draft" }
 if ($release.tag_name -ne $version) { Write-ReleaseError "Draft tag is $($release.tag_name), expected $version" }
 if ($release.target_commitish -ne $releaseSha) {

@@ -287,6 +287,28 @@ function Assert-ReleaseDoesNotExist([string] $Version) {
 	Write-ReleaseError "Release $Version already exists: $locations"
 }
 
+function Wait-ReleaseByUrl {
+	param(
+		[Parameter(Mandatory)] [string] $Url,
+		[int] $Attempts = 5,
+		[int] $DelaySeconds = 2
+	)
+
+	foreach ($attempt in 1..$Attempts) {
+		$releases = @(Get-ReleaseHistory | Where-Object { $_.html_url -eq $Url })
+		if ($releases.Count -gt 1) {
+			Write-ReleaseError "Multiple releases have URL: $Url"
+		}
+		if ($releases.Count -eq 1) {
+			return $releases[0]
+		}
+		if ($attempt -lt $Attempts) {
+			Start-Sleep -Seconds $DelaySeconds
+		}
+	}
+	return $null
+}
+
 function Update-FloatingTag {
 	[CmdletBinding(SupportsShouldProcess)]
 	param(

@@ -165,4 +165,26 @@ Assert-ReleaseDoesNotExist 'v3.0.1'
 		expect(failure?.message).toContain("Release v3.0.1 already exists");
 		expect(failure?.stdout).toContain("untagged-draft");
 	});
+
+	test("waits for a newly created draft to appear in release history", async () => {
+		const output = await invokePowerShell(`
+. '${commonScript}'
+$script:queries = 0
+function Get-ReleaseHistory {
+	$script:queries++
+	if ($script:queries -lt 3) { return @() }
+	return @([pscustomobject]@{
+		tag_name = 'v3.0.1'
+		draft = $true
+		html_url = 'https://github.com/dprint/check/releases/tag/untagged-draft'
+	})
+}
+$release = Wait-ReleaseByUrl 'https://github.com/dprint/check/releases/tag/untagged-draft' -Attempts 3 -DelaySeconds 0
+@{ queries = $script:queries; url = $release.html_url } | ConvertTo-Json -Compress
+`);
+		expect(JSON.parse(output)).toEqual({
+			queries: 3,
+			url: "https://github.com/dprint/check/releases/tag/untagged-draft",
+		});
+	});
 });
