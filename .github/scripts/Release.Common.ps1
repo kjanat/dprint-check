@@ -134,6 +134,10 @@ function Get-ReleasePath([string] $Root) {
 	return @((Get-ReleaseChecksumPath)) + @(Get-ReleaseBundlePath -Root $Root)
 }
 
+function Get-ActionPackagePath([string] $Root) {
+	return @('action.yml') + @(Get-ReleasePath -Root $Root)
+}
+
 function Get-ReleaseAssetName([string[]] $Path) {
 	$names = @($Path | ForEach-Object { Split-Path -Leaf $_ })
 	if (@($names | Sort-Object -Unique).Count -ne $names.Count) {

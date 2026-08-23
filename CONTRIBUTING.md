@@ -90,9 +90,10 @@ See GitHub's documentation for [immutable releases], [artifact attestations],
    an existing draft or release with that version blocks preparation.
 4. Wait for the workflow to create the draft release. It builds and attests the
    bundle, independently rebuilds it, and creates a signed release commit whose
-   only changes from the source commit are:
+   complete tree contains only:
 
    ```text
+   action.yml
    SHA256SUMS
    dist/<every bundle path listed in SHA256SUMS>
    ```
@@ -104,7 +105,7 @@ See GitHub's documentation for [immutable releases], [artifact attestations],
    the draft automatically triggers the final verification phase of the
    `Release` workflow.
 6. Wait for the release-triggered verification job. It verifies the immutable
-   release, signed single-parent release commit, changed paths, checksums,
+   release, signed single-parent release commit, complete package tree, checksums,
    provenance, independent rebuild, and published checksum asset before moving
    eligible floating tags.
 7. Verify the completed workflow and release:

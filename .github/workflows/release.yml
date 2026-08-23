@@ -114,15 +114,27 @@ jobs:
           fetch-depth: 0
           path: release
           ref: "refs/tags/${{ env.VERSION }}"
+      - name: Read source commit
+        id: source
+        run: |
+          "sha=$(git -C release rev-parse HEAD^)" >> $env:GITHUB_OUTPUT
+      - uses: *checkout-action
+        with:
+          path: source
+          ref: "${{ steps.source.outputs.sha }}"
+      - uses: *checkout-action
+        with:
+          path: automation
+          ref: "${{ env.DEFAULT_BRANCH }}"
       - uses: *setup-bun-action
-        with: { bun-version-file: release/package.json }
+        with: { bun-version-file: automation/package.json }
       - name: Read GitHub API version
         id: github-api
         run: |
-          $version = bun -e 'import { GITHUB_API } from "./release/src/lib/github.ts"; process.stdout.write(GITHUB_API.version)'
+          $version = bun -e 'import { GITHUB_API } from "./automation/src/lib/github.ts"; process.stdout.write(GITHUB_API.version)'
           "version=$version" >> $env:GITHUB_OUTPUT
       - name: Verify immutable release and move floating tags
         env:
           GH_API_VERSION: "${{ steps.github-api.outputs.version }}"
           GH_TOKEN: "${{ github.token }}"
-        run: ./release/.github/scripts/Complete-Release.ps1
+        run: ./automation/.github/scripts/Complete-Release.ps1

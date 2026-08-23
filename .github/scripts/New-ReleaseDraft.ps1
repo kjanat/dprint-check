@@ -17,10 +17,9 @@ Assert-ReleaseChecksum -Root candidate
 Assert-ReleaseDoesNotExist $version
 
 $releasePaths = @(Get-ReleasePath -Root candidate)
-$sourceTree = (Invoke-GitHubApi -Path "repos/{owner}/{repo}/git/commits/$sourceSha").tree.sha
 $releaseTree = (Invoke-GitHubApi -Method POST -Path 'repos/{owner}/{repo}/git/trees' -Body @{
-		base_tree = $sourceTree
-		tree      = @(
+		tree = @(
+			@{ path = 'action.yml'; mode = '100644'; type = 'blob'; sha = Invoke-GitBlobCreation 'action.yml' }
 			foreach ($path in $releasePaths) {
 				@{ path = $path; mode = '100644'; type = 'blob'; sha = Invoke-GitBlobCreation (Join-Path candidate $path) }
 			}
@@ -105,14 +104,14 @@ $editUrl = $release.html_url.Replace('/releases/tag/', '/releases/edit/')
 $major = "v$($releaseVersion.Major)"
 $minor = "$major.$($releaseVersion.Minor)"
 $releaseBadge = "https://img.shields.io/github/v/release/${repository}?include_prereleases&sort=semver&filter=${version}&display_name=release&style=flat-square"
-$tagBadge = "https://img.shields.io/github/v/tag/${repository}?include_prereleases&sort=semver&filter=${version}&style=flat-square"
+$tagBadge = "https://img.shields.io/github/v/tag/${repository}?include_prereleases&sort=semver&filter=${version}&display_name=tag%20tree&style=flat-square"
 $summary = @"
 ## Publish $version
 
 > [!IMPORTANT]
 > **The Action is not published yet.** Preparation and verification succeeded; this existing draft is ready to publish.
 >
-> **Do not dispatch the Release workflow again.** Take this release out of draft by selecting **Publish release**. Publication triggers final verification, which moves `$major` and `$minor` only after every check passes.
+> **Do not dispatch the Release workflow again.** Take this release out of draft by selecting **Publish release**. Publication triggers final verification, which moves ``$major`` and ``$minor`` only after every check passes.
 
 [![GitHub Release]($releaseBadge)]($releaseUrl) [![GitHub Tag]($tagBadge)]($tagUrl)
 

@@ -20,6 +20,10 @@ if ($parents.Count -ne 2) {
 	Write-ReleaseError "Release commit $releaseSha has $($parents.Count - 1) parents, expected 1"
 }
 $sourceSha = $parents[1]
+$checkedOutSourceSha = (git -C source rev-parse HEAD).Trim()
+if ($checkedOutSourceSha -ne $sourceSha) {
+	Write-ReleaseError "Checked-out source $checkedOutSourceSha does not match release parent $sourceSha"
+}
 $trailer = (git -C release log -1 '--format=%(trailers:key=Source-Commit,valueonly)').Trim()
 if ($trailer -ne $sourceSha) {
 	Write-ReleaseError "Release source trailer does not match its parent"
@@ -35,10 +39,11 @@ if (-not $commit.commit.verification.verified) {
 
 $releasePaths = @(Get-ReleasePath -Root release)
 $bundlePaths = @(Get-ReleaseBundlePath -Root release)
-$changedPaths = @(git -C release diff --name-only $sourceSha $releaseSha | Sort-Object)
-$expectedPaths = @($releasePaths | Sort-Object)
-if (Compare-Object $expectedPaths $changedPaths) {
-	Write-ReleaseError "Unexpected release paths: $($changedPaths -join ', ')"
+$packagePaths = @(Get-ActionPackagePath -Root release)
+$treePaths = @(git -C release ls-tree -r --name-only $releaseSha | Sort-Object)
+$expectedPaths = @($packagePaths | Sort-Object)
+if (Compare-Object $expectedPaths $treePaths) {
+	Write-ReleaseError "Unexpected release tree: $($treePaths -join ', ')"
 }
 
 Assert-ReleaseChecksum -Root release
@@ -52,7 +57,6 @@ foreach ($path in $bundlePaths) {
 		--deny-self-hosted-runners
 }
 
-git -C release worktree add --detach ../source $sourceSha
 Push-Location source
 try {
 	bun install --frozen-lockfile
@@ -62,7 +66,7 @@ finally {
 	Pop-Location
 }
 Assert-ReleaseChecksum -Root source
-foreach ($path in $releasePaths) {
+foreach ($path in $packagePaths) {
 	Assert-FilesIdentical (Join-Path source $path) (Join-Path release $path)
 }
 

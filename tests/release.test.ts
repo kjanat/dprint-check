@@ -75,13 +75,19 @@ try {
 	$hash = (Get-FileHash (Join-Path $fixture 'dist/action.mjs') -Algorithm SHA256).Hash.ToLowerInvariant()
 	[IO.File]::WriteAllText((Join-Path $fixture 'SHA256SUMS'), "$hash  dist/action.mjs\`n")
 	Assert-ReleaseChecksum -Root $fixture
-	Get-ReleasePath -Root $fixture | ConvertTo-Json -Compress
+	@{
+		assets = @(Get-ReleasePath -Root $fixture)
+		package = @(Get-ActionPackagePath -Root $fixture)
+	} | ConvertTo-Json -Compress
 }
 finally {
 	Remove-Item -Recurse -Force $fixture
 }
 `);
-		expect(JSON.parse(output)).toEqual(["SHA256SUMS", "dist/action.mjs"]);
+		expect(JSON.parse(output)).toEqual({
+			assets: ["SHA256SUMS", "dist/action.mjs"],
+			package: ["action.yml", "SHA256SUMS", "dist/action.mjs"],
+		});
 	});
 
 	test("renders release provenance and source changes before generated notes", async () => {
