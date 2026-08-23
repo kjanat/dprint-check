@@ -307,6 +307,7 @@ jobs:
             echo "release-sha=${release_sha}"
             echo "source-sha=${source_sha}"
             echo "major=${VERSION%%.*}"
+            echo "minor=${VERSION%.*}"
           } >> "${GITHUB_OUTPUT}"
       - uses: *checkout-action
         with:
@@ -346,47 +347,68 @@ jobs:
             --dir published
           gh release verify-asset "${VERSION}" published/SHA256SUMS
           cmp release/SHA256SUMS published/SHA256SUMS
-      - name: Move floating major tag
+      - name: Move floating release tags
         env:
           GH_API_VERSION: "${{ steps.github-api.outputs.version }}"
           GH_TOKEN: "${{ github.token }}"
           MAJOR: "${{ steps.release.outputs.major }}"
+          MINOR: "${{ steps.release.outputs.minor }}"
           RELEASE_SHA: "${{ steps.release.outputs.release-sha }}"
         run: |
           set -euo pipefail
-          latest_version="$(
+          stable_versions="$(
             gh api --paginate \
               -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
               "repos/{owner}/{repo}/releases?per_page=100" \
-              --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name' \
-              | awk -v major="${MAJOR}" '$0 ~ ("^" major "\\.[0-9]+\\.[0-9]+$")' \
+              --jq '.[] | select(.draft == false and .prerelease == false) | .tag_name'
+          )"
+
+          latest_minor="$(
+            awk -v minor="${MINOR}" '$0 ~ ("^" minor "\\.[0-9]+$")' <<< "${stable_versions}" \
               | sort -V \
               | tail -n1
           )"
-          [[ "${latest_version}" == "${VERSION}" ]] || {
-            echo "Refusing to move ${MAJOR} to ${VERSION}; latest stable release is ${latest_version:-none}" >&2
-            exit 1
-          }
-          if gh api \
-            -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
-            "repos/{owner}/{repo}/git/ref/tags/${MAJOR}" >/dev/null 2>&1; then
-            gh api --method PATCH \
+          latest_major="$(
+            awk -v major="${MAJOR}" '$0 ~ ("^" major "\\.[0-9]+\\.[0-9]+$")' <<< "${stable_versions}" \
+              | sort -V \
+              | tail -n1
+          )"
+
+          update_floating_tag() {
+            local tag="$1"
+            if gh api \
               -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
-              "repos/{owner}/{repo}/git/refs/tags/${MAJOR}" \
-              -f sha="${RELEASE_SHA}" \
-              -F force=true >/dev/null
+              "repos/{owner}/{repo}/git/ref/tags/${tag}" >/dev/null 2>&1; then
+              gh api --method PATCH \
+                -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
+                "repos/{owner}/{repo}/git/refs/tags/${tag}" \
+                -f sha="${RELEASE_SHA}" \
+                -F force=true >/dev/null
+            else
+              gh api --method POST \
+                -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
+                "repos/{owner}/{repo}/git/refs" \
+                -f ref="refs/tags/${tag}" \
+                -f sha="${RELEASE_SHA}" >/dev/null
+            fi
+            local actual
+            actual="$(gh api \
+              -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
+              "repos/{owner}/{repo}/git/ref/tags/${tag}" \
+              --jq .object.sha)"
+            [[ "${actual}" == "${RELEASE_SHA}" ]] || {
+              echo "${tag} points to ${actual}, expected ${RELEASE_SHA}" >&2
+              exit 1
+            }
+          }
+
+          if [[ "${latest_minor}" == "${VERSION}" ]]; then
+            update_floating_tag "${MINOR}"
           else
-            gh api --method POST \
-              -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
-              "repos/{owner}/{repo}/git/refs" \
-              -f ref="refs/tags/${MAJOR}" \
-              -f sha="${RELEASE_SHA}" >/dev/null
+            echo "Leaving ${MINOR} unchanged; latest stable release is ${latest_minor:-none}"
           fi
-          actual="$(gh api \
-            -H "X-GitHub-Api-Version: ${GH_API_VERSION}" \
-            "repos/{owner}/{repo}/git/ref/tags/${MAJOR}" \
-            --jq .object.sha)"
-          [[ "${actual}" == "${RELEASE_SHA}" ]] || {
-            echo "${MAJOR} points to ${actual}, expected ${RELEASE_SHA}" >&2
-            exit 1
-          }
+          if [[ "${latest_major}" == "${VERSION}" ]]; then
+            update_floating_tag "${MAJOR}"
+          else
+            echo "Leaving ${MAJOR} unchanged; latest stable release is ${latest_major:-none}"
+          fi
