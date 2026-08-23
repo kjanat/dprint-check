@@ -33,14 +33,17 @@ if (-not $commit.commit.verification.verified) {
 	Write-ReleaseError "Release commit $releaseSha is not verified"
 }
 
+$releasePaths = @(Get-ReleasePath -Root release)
+$bundlePaths = @(Get-ReleaseBundlePath -Root release)
 $changedPaths = @(git -C release diff --name-only $sourceSha $releaseSha | Sort-Object)
-$expectedPaths = @('SHA256SUMS', 'dist/main.mjs', 'dist/post.mjs') | Sort-Object
+$expectedPaths = @($releasePaths | Sort-Object)
 if (Compare-Object $expectedPaths $changedPaths) {
 	Write-ReleaseError "Unexpected release paths: $($changedPaths -join ', ')"
 }
 
 Assert-ReleaseChecksum -Root release
-foreach ($file in @('release/dist/main.mjs', 'release/dist/post.mjs')) {
+foreach ($path in $bundlePaths) {
+	$file = Join-Path release $path
 	gh attestation verify $file `
 		--owner $owner `
 		--signer-workflow "$repository/.github/workflows/release.yml" `
@@ -58,19 +61,23 @@ try {
 finally {
 	Pop-Location
 }
-Assert-FilesIdentical source/dist/main.mjs release/dist/main.mjs
-Assert-FilesIdentical source/dist/post.mjs release/dist/post.mjs
+Assert-ReleaseChecksum -Root source
+foreach ($path in $releasePaths) {
+	Assert-FilesIdentical (Join-Path source $path) (Join-Path release $path)
+}
 
-New-Item -ItemType Directory -Path published/dist -Force | Out-Null
-gh release download $version --pattern SHA256SUMS --dir published
-gh release download $version --pattern main.mjs --pattern post.mjs --dir published/dist
-foreach ($file in @('published/SHA256SUMS', 'published/dist/main.mjs', 'published/dist/post.mjs')) {
+foreach ($path in $releasePaths) {
+	$assetName = Split-Path -Leaf $path
+	$file = Join-Path published $path
+	$directory = Split-Path -Parent $file
+	New-Item -ItemType Directory -Path $directory -Force | Out-Null
+	gh release download $version --pattern $assetName --dir $directory
 	gh release verify-asset $version $file
 }
 Assert-ReleaseChecksum -Root published
-Assert-FilesIdentical release/SHA256SUMS published/SHA256SUMS
-Assert-FilesIdentical release/dist/main.mjs published/dist/main.mjs
-Assert-FilesIdentical release/dist/post.mjs published/dist/post.mjs
+foreach ($path in $releasePaths) {
+	Assert-FilesIdentical (Join-Path release $path) (Join-Path published $path)
+}
 
 $stableTags = Get-StableReleaseTag (Get-ReleaseHistory)
 $major = "v$($releaseVersion.Major)"

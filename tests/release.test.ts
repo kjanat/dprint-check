@@ -65,20 +65,40 @@ $succeeded = Test-NativeCommand { pwsh -NoProfile -NonInteractive -Command 'exit
 		expect(output).toBe("False|0");
 	});
 
-	test("renders valid Markdown before generated release notes", async () => {
+	test("renders release provenance and source changes before generated notes", async () => {
 		const output = await invokePowerShell(`
 . '${commonScript}'
 $commits = @([pscustomobject]@{
-	sha = 'dc61e8325cafac8757b0aa33e513cb3f3a187342'
+	sha = '3333333333333333333333333333333333333333'
 	commit = [pscustomobject]@{ message = "Strengthen CI and release verification\`n\`nDetails" }
 })
-$notes = Format-ReleaseNote -Commits $commits -RepositoryUrl 'https://github.com/kjanat/dprint-check'
+$notes = Format-ReleaseNote -Commits $commits -RepositoryUrl 'https://github.com/dprint/check' -Version 'v3.0.0' -SourceSha '1111111111111111111111111111111111111111' -ReleaseSha '2222222222222222222222222222222222222222' -AttestationUrl 'https://github.com/dprint/check/attestations/12345678' -ReleasePath @('SHA256SUMS', 'dist/action.mjs')
 $notes | ConvertTo-Json -Compress
 `);
-		expect(JSON.parse(output)).toBe(
-			"## Changes\n\n"
-				+ "- [`dc61e83`](https://github.com/kjanat/dprint-check/commit/dc61e8325cafac8757b0aa33e513cb3f3a187342): Strengthen CI and release verification\n\n",
+		const notes = JSON.parse(output) as string;
+		expect(notes).toContain("## Provenance and verification");
+		expect(notes).toContain(
+			"[GitHub artifact attestation](https://github.com/dprint/check/attestations/12345678)",
 		);
+		expect(notes).toContain(
+			"[`SHA256SUMS`](https://github.com/dprint/check/releases/download/v3.0.0/SHA256SUMS)",
+		);
+		expect(notes).toContain("gh release verify v3.0.0 -R dprint/check");
+		expect(notes).toContain("## Source changes");
+		expect(notes).toContain(
+			"[`3333333`](https://github.com/dprint/check/commit/3333333333333333333333333333333333333333): Strengthen CI and release verification",
+		);
+	});
+
+	test("renders provenance for the first release without source changes", async () => {
+		const output = await invokePowerShell(`
+. '${commonScript}'
+$notes = Format-ReleaseNote -Commits @() -RepositoryUrl 'https://github.com/dprint/check' -Version 'v3.0.0' -SourceSha '1111111111111111111111111111111111111111' -ReleaseSha '2222222222222222222222222222222222222222' -AttestationUrl 'https://github.com/dprint/check/attestations/12345678' -ReleasePath @('SHA256SUMS', 'dist/action.mjs')
+$notes | ConvertTo-Json -Compress
+`);
+		const notes = JSON.parse(output) as string;
+		expect(notes).toContain("## Provenance and verification");
+		expect(notes).not.toContain("## Source changes");
 	});
 
 	test("selects previous and floating releases by semantic version", async () => {

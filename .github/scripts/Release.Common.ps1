@@ -90,49 +90,66 @@ function Add-GitHubOutput([string] $Name, [string] $Value) {
 	[IO.File]::AppendAllText($outputPath, "$Name=$Value`n", [Text.UTF8Encoding]::new($false))
 }
 
-
-function Write-ReleaseChecksum {
-	[CmdletBinding(SupportsShouldProcess)]
-	param(
-		[Parameter(Mandatory)] [string] $Root,
-		[Parameter(Mandatory)] [string[]] $Paths,
-		[string] $Manifest = 'SHA256SUMS'
-	)
-
-	$manifestPath = Join-Path $Root $Manifest
-	if (-not $PSCmdlet.ShouldProcess($manifestPath, 'Write release checksum manifest')) {
-		return
-	}
-	$lines = foreach ($path in $Paths) {
-		$fullPath = Join-Path $Root $path
-		if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
-			Write-ReleaseError "Missing release file: $fullPath"
-		}
-		$hash = (Get-FileHash -LiteralPath $fullPath -Algorithm SHA256).Hash.ToLowerInvariant()
-		"$hash  $path"
-	}
-	[IO.File]::WriteAllText($manifestPath, ($lines -join "`n") + "`n", [Text.UTF8Encoding]::new($false))
+function Get-ReleaseChecksumPath {
+	return 'SHA256SUMS'
 }
 
-function Assert-ReleaseChecksum {
+function Read-ReleaseChecksumEntry {
 	param(
 		[Parameter(Mandatory)] [string] $Root,
-		[string] $Manifest = 'SHA256SUMS'
+		[string] $Manifest
 	)
 
+	$Manifest = $Manifest ?? (Get-ReleaseChecksumPath)
 	$manifestPath = Join-Path $Root $Manifest
 	$lines = [IO.File]::ReadAllLines($manifestPath)
 	if ($lines.Count -eq 0) {
 		Write-ReleaseError "Checksum manifest is empty: $manifestPath"
 	}
-	foreach ($line in $lines) {
-		if ($line -notmatch '^([0-9a-fA-F]{64})  (.+)$') {
-			Write-ReleaseError "Invalid checksum entry: $line"
+	$entries = @(
+		foreach ($line in $lines) {
+			if ($line -notmatch '^([0-9a-fA-F]{64})  (.+)$') {
+				Write-ReleaseError "Invalid checksum entry: $line"
+			}
+			$path = $Matches[2]
+			if ([IO.Path]::IsPathRooted($path) -or ($path -split '[/\\]') -contains '..') {
+				Write-ReleaseError "Invalid release path: $path"
+			}
+			[pscustomobject] @{ Hash = $Matches[1].ToLowerInvariant(); Path = $path }
 		}
-		$expected = $Matches[1].ToLowerInvariant()
-		$path = Join-Path $Root $Matches[2]
+	)
+	if (@($entries.Path | Sort-Object -Unique).Count -ne $entries.Count) {
+		Write-ReleaseError 'Checksum manifest must contain unique paths'
+	}
+	return $entries
+}
+
+function Get-ReleaseBundlePath([string] $Root) {
+	return @(Read-ReleaseChecksumEntry -Root $Root | ForEach-Object Path)
+}
+
+function Get-ReleasePath([string] $Root) {
+	return @((Get-ReleaseChecksumPath)) + @(Get-ReleaseBundlePath -Root $Root)
+}
+
+function Get-ReleaseAssetName([string[]] $Path) {
+	$names = @($Path | ForEach-Object { Split-Path -Leaf $_ })
+	if (@($names | Sort-Object -Unique).Count -ne $names.Count) {
+		Write-ReleaseError 'Release paths must have unique asset names'
+	}
+	return $names
+}
+
+function Assert-ReleaseChecksum {
+	param(
+		[Parameter(Mandatory)] [string] $Root,
+		[string] $Manifest
+	)
+
+	foreach ($entry in @(Read-ReleaseChecksumEntry -Root $Root -Manifest $Manifest)) {
+		$path = Join-Path $Root $entry.Path
 		$actual = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
-		if ($actual -ne $expected) {
+		if ($actual -ne $entry.Hash) {
 			Write-ReleaseError "Checksum mismatch for $path"
 		}
 	}
@@ -198,11 +215,46 @@ function Get-SourceCommit([string] $Message, [string] $Fallback) {
 	return $Fallback
 }
 
-function Format-ReleaseNote([object[]] $Commits, [string] $RepositoryUrl) {
+function Format-ReleaseNote {
+	param(
+		[Parameter(Mandatory)] [AllowEmptyCollection()] [object[]] $Commits,
+		[Parameter(Mandatory)] [string] $RepositoryUrl,
+		[Parameter(Mandatory)] [string] $Version,
+		[Parameter(Mandatory)] [string] $SourceSha,
+		[Parameter(Mandatory)] [string] $ReleaseSha,
+		[Parameter(Mandatory)] [string] $AttestationUrl,
+		[Parameter(Mandatory)] [string[]] $ReleasePath
+	)
+
+	$repository = ([Uri] $RepositoryUrl).AbsolutePath.Trim('/')
+	$assetUrl = "$RepositoryUrl/releases/download/$Version"
+	$assetNames = @(Get-ReleaseAssetName -Path $ReleasePath)
+	$assetLinks = @($assetNames | ForEach-Object { "[``$_``]($assetUrl/$_)" })
+	$downloadPatterns = @($assetNames | ForEach-Object { "--pattern $_" }) -join ' '
+	$lines = @(
+		'## Provenance and verification'
+		''
+		"This release contains the generated JavaScript Action bundle built from source commit [``$($SourceSha.Substring(0, 7))``]($RepositoryUrl/commit/$SourceSha) and added by signed release commit [``$($ReleaseSha.Substring(0, 7))``]($RepositoryUrl/commit/$ReleaseSha)."
+		''
+		"- Bundle provenance: [GitHub artifact attestation]($AttestationUrl)"
+		"- Release assets: $($assetLinks -join ', ')"
+		'- Independent rebuild: the generated bundles matched a clean rebuild from the source commit byte-for-byte before the draft was created'
+		'- Finalization: publication verifies the immutable release, assets, checksums, provenance, and release commit before moving floating tags'
+		''
+		'Verify the published release and its downloaded assets with GitHub CLI:'
+		''
+		'```sh'
+		"gh release verify $Version -R $repository"
+		"gh release download $Version -R $repository $downloadPatterns"
+	)
+	$lines += @(
+		$assetNames | ForEach-Object { "gh release verify-asset $Version $_ -R $repository" }
+	)
+	$lines += '```'
 	if ($Commits.Count -eq 0) {
-		return $null
+		return ($lines -join "`n") + "`n`n"
 	}
-	$lines = @('## Changes', '')
+	$lines += @('', '## Source changes', '')
 	foreach ($commit in $Commits) {
 		$subject = ([string] $commit.commit.message -split "`r?`n", 2)[0]
 		$shortSha = ([string] $commit.sha).Substring(0, 7)

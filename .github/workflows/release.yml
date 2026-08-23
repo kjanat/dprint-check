@@ -49,13 +49,6 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run build
       - run: bun run check
-      - name: Hash release bundle
-        run: |
-          Set-StrictMode -Version Latest
-          $ErrorActionPreference = 'Stop'
-          $PSNativeCommandUseErrorActionPreference = $true
-          . ./.github/scripts/Release.Common.ps1
-          Write-ReleaseChecksum -Root . -Paths dist/main.mjs, dist/post.mjs
       - name: Attest release bundle
         id: attestation
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
@@ -65,8 +58,7 @@ jobs:
         with:
           name: ${{ env.CANDIDATE_ARTIFACT }}
           path: |
-            dist/main.mjs
-            dist/post.mjs
+            dist/
             SHA256SUMS
           if-no-files-found: error
           retention-days: 1

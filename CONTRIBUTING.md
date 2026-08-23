@@ -93,14 +93,13 @@ See GitHub's documentation for [immutable releases], [artifact attestations],
 
    ```text
    SHA256SUMS
-   dist/main.mjs
-   dist/post.mjs
+   dist/<every bundle path listed in SHA256SUMS>
    ```
 
-5. Review the workflow summary and draft. Confirm that `SHA256SUMS`, `main.mjs`,
-   and `post.mjs` are attached. Do not replace them or change the target commit.
-   Confirm release immutability is enabled, then publish the draft through
-   GitHub's release UI. Publishing it automatically triggers the final
+5. Review the workflow summary and draft. Confirm that `SHA256SUMS` and every
+   bundle named by it are attached. Do not replace them or change the target
+   commit. Confirm release immutability is enabled, then publish the draft
+   through GitHub's release UI. Publishing it automatically triggers the final
    verification phase of the `Release` workflow.
 6. Wait for the release-triggered verification job. It verifies the immutable
    release, signed single-parent release commit, changed paths, checksums,

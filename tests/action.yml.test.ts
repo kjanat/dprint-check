@@ -1,6 +1,6 @@
 import { describe, expect, expectTypeOf, test } from "bun:test";
-import { readdir } from "node:fs/promises";
-import { basename, dirname, join } from "node:path";
+import { readdir, readFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 
 import action from "#action.yml" with { type: "yaml" };
 import { ACTION_INPUT, ACTION_OUTPUT, ACTION_VALUE, DPRINT } from "#lib/contracts";
@@ -45,9 +45,16 @@ describe("action metadata", () => {
 	});
 });
 
-test("dist contains exactly the configured entrypoints", async () => {
+test("checksum manifest covers the bundle and configured entrypoints", async () => {
 	const files = await readdir(join(root, "dist"), { withFileTypes: true });
-	const actualFiles = files.filter(file => file.isFile()).map(file => file.name).toSorted();
-	const expectedFiles = [action.runs.main, action.runs.post].map(path => basename(path)).toSorted();
-	expect(actualFiles).toEqual(expectedFiles);
+	const bundlePaths = files.filter(file => file.isFile()).map(file => `dist/${file.name}`).toSorted();
+	expect(bundlePaths).toEqual(expect.arrayContaining([action.runs.main, action.runs.post]));
+	const checksums = (await readFile(join(root, "SHA256SUMS"), "utf8"))
+		.trim()
+		.split(/\r?\n/);
+	const releasePaths = checksums.map(line => {
+		expect(line).toMatch(/^[0-9a-f]{64} {2}.+$/);
+		return line.slice(66);
+	});
+	expect(releasePaths.toSorted()).toEqual(bundlePaths);
 });

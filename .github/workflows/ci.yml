@@ -27,7 +27,8 @@ jobs:
       - run: bun run build
       - name: Validate built action
         run: |
-          foreach ($file in @("dist/main.mjs", "dist/post.mjs")) {
+          $entrypoints = bun -e 'import action from "./action.yml" with { type: "yaml" }; console.log(action.runs.main); console.log(action.runs.post)'
+          foreach ($file in $entrypoints) {
             if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing $file" }
             node --check $file
           }

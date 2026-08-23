@@ -15,13 +15,14 @@ $attestationUrl = Get-RequiredEnvironmentVariable 'ATTESTATION_URL'
 $null = Assert-StableReleaseVersion $version
 Assert-ReleaseChecksum -Root candidate
 
+$releasePaths = @(Get-ReleasePath -Root candidate)
 $sourceTree = (Invoke-GitHubApi -Path "repos/{owner}/{repo}/git/commits/$sourceSha").tree.sha
 $releaseTree = (Invoke-GitHubApi -Method POST -Path 'repos/{owner}/{repo}/git/trees' -Body @{
 		base_tree = $sourceTree
 		tree      = @(
-			@{ path = 'dist/main.mjs'; mode = '100644'; type = 'blob'; sha = Invoke-GitBlobCreation 'candidate/dist/main.mjs' }
-			@{ path = 'dist/post.mjs'; mode = '100644'; type = 'blob'; sha = Invoke-GitBlobCreation 'candidate/dist/post.mjs' }
-			@{ path = 'SHA256SUMS'; mode = '100644'; type = 'blob'; sha = Invoke-GitBlobCreation 'candidate/SHA256SUMS' }
+			foreach ($path in $releasePaths) {
+				@{ path = $path; mode = '100644'; type = 'blob'; sha = Invoke-GitBlobCreation (Join-Path candidate $path) }
+			}
 		)
 	}).sha
 
@@ -43,22 +44,27 @@ if (-not $releaseCommit.verification.verified) {
 $stableTags = Get-StableReleaseTag (Get-ReleaseHistory)
 $previousVersion = Get-PreviousStableReleaseVersion -Tags $stableTags -Version $version
 $releaseOptions = @('--generate-notes')
+$commits = @()
 if ($previousVersion) {
 	$releaseOptions += '--notes-start-tag', $previousVersion
 	$previousCommit = Invoke-GitHubApi -Path "repos/{owner}/{repo}/commits/$previousVersion"
 	$previousSource = Get-SourceCommit -Message $previousCommit.commit.message -Fallback $previousCommit.sha
 	$comparison = Invoke-GitHubApi -Path "repos/{owner}/{repo}/compare/$previousSource...$sourceSha"
-	$notes = Format-ReleaseNote -Commits @($comparison.commits) -RepositoryUrl "$serverUrl/$repository"
-	if ($notes) {
-		$releaseOptions += '--notes', $notes
-	}
+	$commits = @($comparison.commits)
 }
+$notes = Format-ReleaseNote `
+	-Commits $commits `
+	-RepositoryUrl "$serverUrl/$repository" `
+	-Version $version `
+	-SourceSha $sourceSha `
+	-ReleaseSha $releaseSha `
+	-AttestationUrl $attestationUrl `
+	-ReleasePath $releasePaths
+$releaseOptions += '--notes', $notes
 
-$releaseArguments = @(
-	'release', 'create', $version,
-	'candidate/SHA256SUMS',
-	'candidate/dist/main.mjs',
-	'candidate/dist/post.mjs',
+$releaseArguments = @('release', 'create', $version)
+$releaseArguments += @($releasePaths | ForEach-Object { Join-Path candidate $_ })
+$releaseArguments += @(
 	'--target', $releaseSha,
 	'--title', $version
 )
@@ -73,7 +79,7 @@ if ($release.targetCommitish -ne $releaseSha) {
 	Write-ReleaseError "Draft targets $($release.targetCommitish), expected $releaseSha"
 }
 $assetNames = @($release.assets | ForEach-Object name | Sort-Object)
-$expectedAssets = @('main.mjs', 'post.mjs', 'SHA256SUMS') | Sort-Object
+$expectedAssets = @(Get-ReleaseAssetName -Path $releasePaths | Sort-Object)
 if (Compare-Object $expectedAssets $assetNames) {
 	Write-ReleaseError "Draft release assets do not match the candidate"
 }

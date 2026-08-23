@@ -12,7 +12,11 @@ $sourceSha = Get-RequiredEnvironmentVariable 'SOURCE_SHA'
 $defaultBranch = Get-RequiredEnvironmentVariable 'DEFAULT_BRANCH'
 
 Assert-ReleaseChecksum -Root candidate
-foreach ($file in @('candidate/dist/main.mjs', 'candidate/dist/post.mjs')) {
+
+$releasePaths = @(Get-ReleasePath -Root candidate)
+$bundlePaths = @(Get-ReleaseBundlePath -Root candidate)
+foreach ($path in $bundlePaths) {
+	$file = Join-Path candidate $path
 	gh attestation verify $file `
 		--owner $owner `
 		--signer-workflow "$repository/.github/workflows/release.yml" `
@@ -22,5 +26,7 @@ foreach ($file in @('candidate/dist/main.mjs', 'candidate/dist/post.mjs')) {
 }
 
 bun run build
-Assert-FilesIdentical dist/main.mjs candidate/dist/main.mjs
-Assert-FilesIdentical dist/post.mjs candidate/dist/post.mjs
+Assert-ReleaseChecksum -Root .
+foreach ($path in $releasePaths) {
+	Assert-FilesIdentical $path (Join-Path candidate $path)
+}
