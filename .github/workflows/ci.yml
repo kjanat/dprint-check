@@ -13,7 +13,9 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
         with: { node-version: "${{ env.NODE_VERSION }}" }
+      # setup-bun already detects packageManager from package.json
       - uses: oven-sh/setup-bun@v2
+      - uses: kjanat/actionlint@v1
       - run: bun install --frozen-lockfile
       - run: bun run build
       - run: bun run check
