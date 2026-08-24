@@ -124,12 +124,11 @@ See GitHub's documentation for [immutable releases], [artifact attestations],
    immutable release, signed single-parent release commit, complete package tree,
    checksums, provenance, independent rebuild, and published checksum asset,
    then moves eligible floating tags.
-7. Verify the completed workflow and release:
-
-   ```sh
-   gh release verify vX.Y.Z
-   gh release view vX.Y.Z
-   ```
+7. Verify the completed workflow and release using the self-contained
+   **Verify** command block in the exact tag's generated `README.md`. The same
+   block is included in the final workflow summary and release notes. It checks
+   publication and the signed release commit, downloads the assets, validates
+   `SHA256SUMS`, and verifies each bundle's provenance.
 
 Do not create or move release tags manually. If draft preparation fails, inspect
 the failed job before retrying, and do not retry the same version while a draft

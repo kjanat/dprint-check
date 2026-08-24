@@ -125,6 +125,11 @@ $summaryPath = Get-RequiredEnvironmentVariable 'GITHUB_STEP_SUMMARY'
 $runNumber = Get-RequiredEnvironmentVariable 'GITHUB_RUN_NUMBER'
 $runId = Get-RequiredEnvironmentVariable 'GITHUB_RUN_ID'
 $releaseUrl = "$serverUrl/$repository/releases/tag/$version"
+$verificationCommand = Format-ReleaseVerificationCommand `
+	-RepositoryUrl "$serverUrl/$repository" `
+	-Version $version `
+	-SourceSha $sourceSha `
+	-ReleasePath $releasePaths
 $summary = @"
 ## $version finalized
 
@@ -137,5 +142,11 @@ $summary = @"
 - Independent rebuild: byte-for-byte identical
 - Floating tags: [$major]($serverUrl/$repository/tree/$major), [$minor]($serverUrl/$repository/tree/$minor)
 - Finalization run: [#$runNumber]($serverUrl/$repository/actions/runs/$runId)
+
+### Verify independently
+
+~~~sh
+$verificationCommand
+~~~
 "@
 [IO.File]::AppendAllText($summaryPath, $summary, [Text.UTF8Encoding]::new($false))

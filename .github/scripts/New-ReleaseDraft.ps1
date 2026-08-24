@@ -110,45 +110,17 @@ Add-GitHubOutput 'release-sha' $releaseSha
 Add-GitHubOutput 'release-url' $release.html_url
 
 $summaryPath = Get-RequiredEnvironmentVariable 'GITHUB_STEP_SUMMARY'
-$runNumber = Get-RequiredEnvironmentVariable 'GITHUB_RUN_NUMBER'
-$runId = Get-RequiredEnvironmentVariable 'GITHUB_RUN_ID'
 $releaseUrl = "$serverUrl/$repository/releases/tag/$version"
-$tagUrl = "$serverUrl/$repository/tree/$version"
-$editUrl = $release.html_url.Replace('/releases/tag/', '/releases/edit/')
 $major = "v$($releaseVersion.Major)"
 $minor = "$major.$($releaseVersion.Minor)"
-$releaseBadge = Get-ReleaseBadgeUrl -Repository $repository -Version $version
-$tagBadge = Get-TagBadgeUrl -Repository $repository -Version $version
-$runUrl = "$serverUrl/$repository/actions/runs/$runId"
 $summary = @"
-## Review $version
+## $version prepared
+
+Preparation and pre-publication verification succeeded for [$version]($releaseUrl).
 
 > [!IMPORTANT]
-> **The Action is not published yet.** Preparation and verification succeeded; this draft is waiting for approval of the ``release`` environment.
+> If the publish job is awaiting approval, review the prepared release, then select **Review deployments** at the top of this run and approve the ``release`` environment.
 >
-> **Do not publish the draft or dispatch this workflow again.** Review the draft, then [return to this run]($runUrl) and approve its pending deployment. The workflow publishes the release and moves ``$major`` and ``$minor`` only after every verification passes.
-
-[![GitHub Release]($releaseBadge)]($releaseUrl) [![GitHub Tag]($tagBadge)]($tagUrl)
-
-### Review and approve
-
-[Review the prepared draft]($editUrl), then [return to this run]($runUrl), select **Review deployments**, and approve the ``release`` environment.
-
-### Open the run with GitHub CLI
-
-~~~sh
-GH_REPO=$repository gh run view $runId --web
-~~~
-
-### Verified release details
-
-- Draft release: [Review $version]($editUrl)
-- Published release: [$version]($releaseUrl) (available after publication)
-- Source commit: [$($sourceSha.Substring(0, 7))]($serverUrl/$repository/commit/$sourceSha)
-- Signed release commit: [$($releaseSha.Substring(0, 7))]($serverUrl/$repository/commit/$releaseSha)
-- Tagged Action tree: [$version]($tagUrl) (available after publication)
-- Preparation run: [#$runNumber]($serverUrl/$repository/actions/runs/$runId)
-- Independent rebuild: byte-for-byte identical
-- Bundle provenance: [view attestation]($attestationUrl)
+> Do not publish the draft manually or dispatch this workflow again. The gated job publishes the release and moves ``$major`` and ``$minor`` only after final verification passes.
 "@
 [IO.File]::AppendAllText($summaryPath, $summary, [Text.UTF8Encoding]::new($false))
