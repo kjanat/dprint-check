@@ -17,9 +17,23 @@ Assert-ReleaseChecksum -Root candidate
 Assert-ReleaseDoesNotExist $version
 
 $releasePaths = @(Get-ReleasePath -Root candidate)
+$licensePaths = @(Get-RootLicensePath -Root '.')
+$readmePath = Join-Path (Get-RequiredEnvironmentVariable 'RUNNER_TEMP') 'release-README.md'
+$readme = Format-ReleaseReadme `
+	-RepositoryUrl "$serverUrl/$repository" `
+	-Version $version `
+	-SourceSha $sourceSha `
+	-AttestationUrl $attestationUrl `
+	-LicensePath $licensePaths
+[IO.File]::WriteAllText($readmePath, $readme, [Text.UTF8Encoding]::new($false))
 $releaseTree = (Invoke-GitHubApi -Method POST -Path 'repos/{owner}/{repo}/git/trees' -Body @{
 		tree = @(
+			@{ path = '.github/workflows/release.yml'; mode = '100644'; type = 'blob'; sha = Invoke-GitBlobCreation '.github/workflows/release.yml' }
 			@{ path = 'action.yml'; mode = '100644'; type = 'blob'; sha = Invoke-GitBlobCreation 'action.yml' }
+			@{ path = 'README.md'; mode = '100644'; type = 'blob'; sha = Invoke-GitBlobCreation $readmePath }
+			foreach ($path in $licensePaths) {
+				@{ path = $path; mode = '100644'; type = 'blob'; sha = Invoke-GitBlobCreation $path }
+			}
 			foreach ($path in $releasePaths) {
 				@{ path = $path; mode = '100644'; type = 'blob'; sha = Invoke-GitBlobCreation (Join-Path candidate $path) }
 			}
@@ -103,8 +117,8 @@ $tagUrl = "$serverUrl/$repository/tree/$version"
 $editUrl = $release.html_url.Replace('/releases/tag/', '/releases/edit/')
 $major = "v$($releaseVersion.Major)"
 $minor = "$major.$($releaseVersion.Minor)"
-$releaseBadge = "https://img.shields.io/github/v/release/${repository}?include_prereleases&sort=semver&filter=${version}&display_name=release&style=flat-square"
-$tagBadge = "https://img.shields.io/github/v/tag/${repository}?include_prereleases&sort=semver&filter=${version}&display_name=tag%20tree&style=flat-square"
+$releaseBadge = Get-ReleaseBadgeUrl -Repository $repository -Version $version
+$tagBadge = Get-TagBadgeUrl -Repository $repository -Version $version
 $summary = @"
 ## Publish $version
 

@@ -39,7 +39,9 @@ if (-not $commit.commit.verification.verified) {
 
 $releasePaths = @(Get-ReleasePath -Root release)
 $bundlePaths = @(Get-ReleaseBundlePath -Root release)
-$packagePaths = @(Get-ActionPackagePath -Root release)
+$licensePaths = @(Get-RootLicensePath -Root source)
+$packagePaths = @(Get-ActionPackagePath -Root release -LicensePath $licensePaths)
+$sourcePaths = @(Get-ActionSourcePath -Root release -LicensePath $licensePaths)
 $treePaths = @(git -C release ls-tree -r --name-only $releaseSha | Sort-Object)
 $expectedPaths = @($packagePaths | Sort-Object)
 if (Compare-Object $expectedPaths $treePaths) {
@@ -66,8 +68,18 @@ finally {
 	Pop-Location
 }
 Assert-ReleaseChecksum -Root source
-foreach ($path in $packagePaths) {
+foreach ($path in $sourcePaths) {
 	Assert-FilesIdentical (Join-Path source $path) (Join-Path release $path)
+}
+$expectedReadme = Format-ReleaseReadme `
+	-RepositoryUrl "$serverUrl/$repository" `
+	-Version $version `
+	-SourceSha $sourceSha `
+	-AttestationUrl $attestationUrl `
+	-LicensePath $licensePaths
+$actualReadme = [IO.File]::ReadAllText((Join-Path release 'README.md'))
+if ($actualReadme -cne $expectedReadme) {
+	Write-ReleaseError 'Generated release README does not match its verified release details'
 }
 
 for ($index = 0; $index -lt $releasePaths.Count; $index++) {
@@ -105,6 +117,8 @@ if ($latestMajor -eq $version) {
 else {
 	Write-Output "Leaving $major unchanged; latest stable release is $($latestMajor ?? 'none')"
 }
+
+Update-ReleaseBadgeCache -Repository $repository -Version $version
 
 $summaryPath = Get-RequiredEnvironmentVariable 'GITHUB_STEP_SUMMARY'
 $runNumber = Get-RequiredEnvironmentVariable 'GITHUB_RUN_NUMBER'

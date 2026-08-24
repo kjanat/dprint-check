@@ -133,8 +133,29 @@ function Get-ReleasePath([string] $Root) {
 	return @((Get-ReleaseChecksumPath)) + @(Get-ReleaseBundlePath -Root $Root)
 }
 
-function Get-ActionPackagePath([string] $Root) {
-	return @('action.yml') + @(Get-ReleasePath -Root $Root)
+function Get-RootLicensePath([string] $Root) {
+	return @(
+		Get-ChildItem -LiteralPath $Root -File |
+			Where-Object Name -Match '^LICEN[CS]E(?:$|[._-])' |
+			ForEach-Object Name |
+			Sort-Object
+	)
+}
+
+function Get-ActionPackagePath {
+	param(
+		[Parameter(Mandatory)] [string] $Root,
+		[string[]] $LicensePath = @()
+	)
+	return @('.github/workflows/release.yml', 'action.yml', 'README.md') + @($LicensePath) + @(Get-ReleasePath -Root $Root)
+}
+
+function Get-ActionSourcePath {
+	param(
+		[Parameter(Mandatory)] [string] $Root,
+		[string[]] $LicensePath = @()
+	)
+	return @('.github/workflows/release.yml', 'action.yml') + @($LicensePath) + @(Get-ReleasePath -Root $Root)
 }
 
 function Get-ReleaseAssetName([string[]] $Path) {
@@ -266,6 +287,86 @@ function Format-ReleaseNote {
 		$lines += "- [``$shortSha``]($RepositoryUrl/commit/$($commit.sha)): $subject"
 	}
 	return ($lines -join "`n") + "`n`n"
+}
+
+function Format-ReleaseReadme {
+	param(
+		[Parameter(Mandatory)] [string] $RepositoryUrl,
+		[Parameter(Mandatory)] [string] $Version,
+		[Parameter(Mandatory)] [string] $SourceSha,
+		[Parameter(Mandatory)] [string] $AttestationUrl,
+		[string[]] $LicensePath = @()
+	)
+
+	$repository = ([Uri] $RepositoryUrl).AbsolutePath.Trim('/')
+	$shortSourceSha = $SourceSha.Substring(0, 7)
+	$lines = @"
+# dprint/check $Version
+
+This is the generated JavaScript Action package for [$Version]($RepositoryUrl/releases/tag/$Version). It was built from source commit [``$shortSourceSha``]($RepositoryUrl/commit/$SourceSha).
+
+## Usage
+
+~~~yaml
+- uses: $repository@$Version
+~~~
+
+## Provenance
+
+- Bundle attestation: [view on GitHub]($AttestationUrl)
+- Checksum manifest: [``SHA256SUMS``]($RepositoryUrl/blob/$Version/SHA256SUMS)
+- Immutable release: [$Version]($RepositoryUrl/releases/tag/$Version)
+"@
+	foreach ($path in $LicensePath) {
+		$lines += "`n- License: [``$path``]($RepositoryUrl/blob/$Version/$path)"
+	}
+	$lines += @"
+
+## Verify
+
+~~~sh
+gh release verify $Version -R $repository
+gh attestation verify dist/main.mjs --repo $repository --source-digest $SourceSha
+gh attestation verify dist/post.mjs --repo $repository --source-digest $SourceSha
+~~~
+"@
+	return $lines
+}
+
+function Get-ReleaseBadgeUrl {
+	param(
+		[Parameter(Mandatory)] [string] $Repository,
+		[Parameter(Mandatory)] [string] $Version
+	)
+	return "https://img.shields.io/github/v/release/${Repository}?include_prereleases&sort=semver&filter=${Version}&display_name=release&style=flat-square"
+}
+
+function Get-TagBadgeUrl {
+	param(
+		[Parameter(Mandatory)] [string] $Repository,
+		[Parameter(Mandatory)] [string] $Version
+	)
+	return "https://img.shields.io/github/v/tag/${Repository}?include_prereleases&sort=semver&filter=${Version}&label=tree&style=flat-square"
+}
+
+function Update-ReleaseBadgeCache {
+	param(
+		[Parameter(Mandatory)] [string] $Repository,
+		[Parameter(Mandatory)] [string] $Version
+	)
+
+	$outputPath = Join-Path (Get-RequiredEnvironmentVariable 'RUNNER_TEMP') 'release-badge.svg'
+	foreach ($url in @(
+			Get-ReleaseBadgeUrl -Repository $Repository -Version $Version
+			Get-TagBadgeUrl -Repository $Repository -Version $Version
+		)) {
+		try {
+			& curl --fail --silent --show-error --header 'Cache-Control: no-cache' --header 'Pragma: no-cache' --output $outputPath $url
+		}
+		catch {
+			Write-Warning "Could not refresh badge cache: $url"
+		}
+	}
 }
 
 function Invoke-GitBlobCreation([string] $Path) {

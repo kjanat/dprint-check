@@ -72,12 +72,15 @@ $fixture = Join-Path ([IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
 try {
 	[void][IO.Directory]::CreateDirectory((Join-Path $fixture 'dist'))
 	[IO.File]::WriteAllText((Join-Path $fixture 'dist/action.mjs'), 'bundle')
+	[IO.File]::WriteAllText((Join-Path $fixture 'LICENSE'), 'license')
 	$hash = (Get-FileHash (Join-Path $fixture 'dist/action.mjs') -Algorithm SHA256).Hash.ToLowerInvariant()
 	[IO.File]::WriteAllText((Join-Path $fixture 'SHA256SUMS'), "$hash  dist/action.mjs\`n")
 	Assert-ReleaseChecksum -Root $fixture
+	$licenses = @(Get-RootLicensePath -Root $fixture)
 	@{
 		assets = @(Get-ReleasePath -Root $fixture)
-		package = @(Get-ActionPackagePath -Root $fixture)
+		package = @(Get-ActionPackagePath -Root $fixture -LicensePath $licenses)
+		source = @(Get-ActionSourcePath -Root $fixture -LicensePath $licenses)
 	} | ConvertTo-Json -Compress
 }
 finally {
@@ -86,7 +89,58 @@ finally {
 `);
 		expect(JSON.parse(output)).toEqual({
 			assets: ["SHA256SUMS", "dist/action.mjs"],
-			package: ["action.yml", "SHA256SUMS", "dist/action.mjs"],
+			package: [
+				".github/workflows/release.yml",
+				"action.yml",
+				"README.md",
+				"LICENSE",
+				"SHA256SUMS",
+				"dist/action.mjs",
+			],
+			source: [
+				".github/workflows/release.yml",
+				"action.yml",
+				"LICENSE",
+				"SHA256SUMS",
+				"dist/action.mjs",
+			],
+		});
+	});
+
+	test("renders a self-contained README for the exact Action tag", async () => {
+		const output = await invokePowerShell(`
+. '${commonScript}'
+$readme = Format-ReleaseReadme -RepositoryUrl 'https://github.com/dprint/check' -Version 'v3.0.0' -SourceSha '1111111111111111111111111111111111111111' -AttestationUrl 'https://github.com/dprint/check/attestations/12345678' -LicensePath @('LICENSE')
+$readme | ConvertTo-Json -Compress
+`);
+		const readme = JSON.parse(output) as string;
+		expect(readme).toContain("# dprint/check v3.0.0");
+		expect(readme).toContain("- uses: dprint/check@v3.0.0");
+		expect(readme).toContain(
+			"[`1111111`](https://github.com/dprint/check/commit/1111111111111111111111111111111111111111)",
+		);
+		expect(readme).toContain(
+			"[view on GitHub](https://github.com/dprint/check/attestations/12345678)",
+		);
+		expect(readme).toContain(
+			"[`LICENSE`](https://github.com/dprint/check/blob/v3.0.0/LICENSE)",
+		);
+		expect(readme).toContain("gh release verify v3.0.0 -R dprint/check");
+	});
+
+	test("builds exact-version release and tag badge URLs", async () => {
+		const output = await invokePowerShell(`
+. '${commonScript}'
+@{
+	release = Get-ReleaseBadgeUrl -Repository 'dprint/check' -Version 'v3.0.0'
+	tag = Get-TagBadgeUrl -Repository 'dprint/check' -Version 'v3.0.0'
+} | ConvertTo-Json -Compress
+`);
+		expect(JSON.parse(output)).toEqual({
+			release:
+				"https://img.shields.io/github/v/release/dprint/check?include_prereleases&sort=semver&filter=v3.0.0&display_name=release&style=flat-square",
+			tag:
+				"https://img.shields.io/github/v/tag/dprint/check?include_prereleases&sort=semver&filter=v3.0.0&label=tree&style=flat-square",
 		});
 	});
 
