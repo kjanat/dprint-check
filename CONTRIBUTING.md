@@ -49,6 +49,7 @@ Configure the repository before publishing a release:
 | -------------------------------------------------------- | ---------------------------------- |
 | GitHub Actions                                           | Enabled                            |
 | Release immutability                                     | Enabled                            |
+| `release` environment                                    | Current maintainer required        |
 | Default workflow permissions                             | Restricted/read-only is sufficient |
 | Allow GitHub Actions to create and approve pull requests | Disabled                           |
 | Send write tokens to workflows from pull requests        | Disabled                           |
@@ -57,6 +58,16 @@ The workflow grants each job only the `GITHUB_TOKEN` permissions it needs.
 It does not require a personal access token or repository secret. Artifact
 attestations must be available; on GitHub Free, Pro, and Team they require a
 public repository.
+
+Create the protected environment with GitHub CLI. The authenticated user becomes
+the required reviewer and may approve their own dispatch:
+
+```sh
+release_repo=dprint/check
+release_reviewer_id="$(gh api user --jq .id)"
+jq -n --argjson id "$release_reviewer_id" '{wait_timer: 0, prevent_self_review: false, reviewers: [{type: "User", id: $id}], deployment_branch_policy: null}' | gh api --method PUT "repos/${release_repo}/environments/release" --input -
+gh api "repos/${release_repo}/environments/release" --jq '{name, protection_rules, deployment_branch_policy}'
+```
 
 Tag rules must allow the release publisher to create exact `vX.Y.Z` tags.
 Floating `vX.Y` and `vX` tags are created or updated by `github-actions[bot]`
@@ -85,29 +96,30 @@ See GitHub's documentation for [immutable releases], [artifact attestations],
    gh workflow run release.yml --ref main -f version=vX.Y.Z
    ```
 
-   This workflow dispatch is the only supported way to prepare a release. It
-   creates a draft but does not publish it. Dispatch each version only once;
-   an existing draft or release with that version blocks preparation.
+   This workflow dispatch is the only supported way to release. It creates a
+   draft and then pauses for approval of the protected `release` environment.
+   Dispatch each version only once; an existing draft or release with that
+   version blocks preparation.
 4. Wait for the workflow to create the draft release. It builds and attests the
    bundle, independently rebuilds it, and creates a signed release commit whose
    complete tree contains only:
 
    ```text
    action.yml
+   README.md
+   LICENSE* or LICENCE* (when present in the repository root)
    SHA256SUMS
    dist/<every bundle path listed in SHA256SUMS>
    ```
 
-5. Follow the workflow summary's **Review and publish** link. Confirm that `SHA256SUMS` and every
-   bundle named by it are attached. Do not replace them or change the target
-   commit. Confirm release immutability is enabled, then publish the draft
-   through GitHub's release UI. Do not dispatch the workflow again. Publishing
-   the draft automatically triggers the final verification phase of the
-   `Release` workflow.
-6. Wait for the release-triggered verification job. It verifies the immutable
-   release, signed single-parent release commit, complete package tree, checksums,
-   provenance, independent rebuild, and published checksum asset before moving
-   eligible floating tags.
+5. Follow the workflow summary's draft link. Confirm that `SHA256SUMS` and every
+   bundle named by it are attached. Do not replace them, change the target
+   commit, publish the draft manually, or dispatch the workflow again.
+6. Return to the pending workflow run, select **Review deployments**, and approve
+   the `release` environment. The same run publishes the draft, verifies the
+   immutable release, signed single-parent release commit, complete package tree,
+   checksums, provenance, independent rebuild, and published checksum asset,
+   then moves eligible floating tags.
 7. Verify the completed workflow and release:
 
    ```sh
@@ -117,7 +129,7 @@ See GitHub's documentation for [immutable releases], [artifact attestations],
 
 Do not create or move release tags manually. If draft preparation fails, inspect
 the failed job before retrying, and do not retry the same version while a draft
-exists. If post-publication verification fails, leave the floating tags
+exists. If publication or final verification fails, leave the floating tags
 unchanged, investigate the failure, and do not bypass the verification job.
 
 [immutable releases]: https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/establish-provenance-and-integrity/prevent-release-changes

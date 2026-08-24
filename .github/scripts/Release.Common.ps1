@@ -147,7 +147,7 @@ function Get-ActionPackagePath {
 		[Parameter(Mandatory)] [string] $Root,
 		[string[]] $LicensePath = @()
 	)
-	return @('.github/workflows/release.yml', 'action.yml', 'README.md') + @($LicensePath) + @(Get-ReleasePath -Root $Root)
+	return @('action.yml', 'README.md') + @($LicensePath) + @(Get-ReleasePath -Root $Root)
 }
 
 function Get-ActionSourcePath {
@@ -155,7 +155,7 @@ function Get-ActionSourcePath {
 		[Parameter(Mandatory)] [string] $Root,
 		[string[]] $LicensePath = @()
 	)
-	return @('.github/workflows/release.yml', 'action.yml') + @($LicensePath) + @(Get-ReleasePath -Root $Root)
+	return @('action.yml') + @($LicensePath) + @(Get-ReleasePath -Root $Root)
 }
 
 function Get-ReleaseAssetName([string[]] $Path) {

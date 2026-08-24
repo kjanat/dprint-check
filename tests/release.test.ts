@@ -90,20 +90,13 @@ finally {
 		expect(JSON.parse(output)).toEqual({
 			assets: ["SHA256SUMS", "dist/action.mjs"],
 			package: [
-				".github/workflows/release.yml",
 				"action.yml",
 				"README.md",
 				"LICENSE",
 				"SHA256SUMS",
 				"dist/action.mjs",
 			],
-			source: [
-				".github/workflows/release.yml",
-				"action.yml",
-				"LICENSE",
-				"SHA256SUMS",
-				"dist/action.mjs",
-			],
+			source: ["action.yml", "LICENSE", "SHA256SUMS", "dist/action.mjs"],
 		});
 	});
 

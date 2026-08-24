@@ -28,7 +28,6 @@ $readme = Format-ReleaseReadme `
 [IO.File]::WriteAllText($readmePath, $readme, [Text.UTF8Encoding]::new($false))
 $releaseTree = (Invoke-GitHubApi -Method POST -Path 'repos/{owner}/{repo}/git/trees' -Body @{
 		tree = @(
-			@{ path = '.github/workflows/release.yml'; mode = '100644'; type = 'blob'; sha = Invoke-GitBlobCreation '.github/workflows/release.yml' }
 			@{ path = 'action.yml'; mode = '100644'; type = 'blob'; sha = Invoke-GitBlobCreation 'action.yml' }
 			@{ path = 'README.md'; mode = '100644'; type = 'blob'; sha = Invoke-GitBlobCreation $readmePath }
 			foreach ($path in $licensePaths) {
@@ -119,25 +118,25 @@ $major = "v$($releaseVersion.Major)"
 $minor = "$major.$($releaseVersion.Minor)"
 $releaseBadge = Get-ReleaseBadgeUrl -Repository $repository -Version $version
 $tagBadge = Get-TagBadgeUrl -Repository $repository -Version $version
+$runUrl = "$serverUrl/$repository/actions/runs/$runId"
 $summary = @"
-## Publish $version
+## Review $version
 
 > [!IMPORTANT]
-> **The Action is not published yet.** Preparation and verification succeeded; this existing draft is ready to publish.
+> **The Action is not published yet.** Preparation and verification succeeded; this draft is waiting for approval of the ``release`` environment.
 >
-> **Do not dispatch the Release workflow again.** Take this release out of draft by selecting **Publish release**. Publication triggers final verification, which moves ``$major`` and ``$minor`` only after every check passes.
+> **Do not publish the draft or dispatch this workflow again.** Review the draft, then [return to this run]($runUrl) and approve its pending deployment. The workflow publishes the release and moves ``$major`` and ``$minor`` only after every verification passes.
 
 [![GitHub Release]($releaseBadge)]($releaseUrl) [![GitHub Tag]($tagBadge)]($tagUrl)
 
-### Publish in the browser
+### Review and approve
 
-[Review the prepared draft]($editUrl), then select **Publish release**.
+[Review the prepared draft]($editUrl), then [return to this run]($runUrl), select **Review deployments**, and approve the ``release`` environment.
 
-### Or publish with GitHub CLI
+### Open the run with GitHub CLI
 
 ~~~sh
-GH_REPO=$repository gh release view $version --web
-GH_REPO=$repository gh release edit $version --draft=false
+GH_REPO=$repository gh run view $runId --web
 ~~~
 
 ### Verified release details
