@@ -1,4 +1,0 @@
-from /workspace/powershell.ps1:
-  1|-function·Test-Thing{param([string]$Name)if($Name-eq'value'){Write-Output·$Name}}
-1  |+function·Test-Thing·{·param([string]$Name)if($Name·-eq·'value')·{·Write-Output·$Name·}·}
---

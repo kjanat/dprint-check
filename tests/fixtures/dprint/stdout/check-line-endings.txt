@@ -1,3 +1,0 @@
-from /workspace/line-endings.ts:
- | Text differed by line endings.
---
