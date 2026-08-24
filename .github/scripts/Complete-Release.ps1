@@ -24,11 +24,11 @@ $checkedOutSourceSha = (git -C source rev-parse HEAD).Trim()
 if ($checkedOutSourceSha -ne $sourceSha) {
 	Write-ReleaseError "Checked-out source $checkedOutSourceSha does not match release parent $sourceSha"
 }
-$trailer = (git -C release log -1 '--format=%(trailers:key=Source-Commit,valueonly)').Trim()
+$trailer = Get-GitTrailerValue -RepositoryPath release -Key 'Source-Commit'
 if ($trailer -ne $sourceSha) {
 	Write-ReleaseError "Release source trailer does not match its parent"
 }
-$attestationUrl = (git -C release log -1 '--format=%(trailers:key=Attestation-URL,valueonly)').Trim()
+$attestationUrl = Get-GitTrailerValue -RepositoryPath release -Key 'Attestation-URL'
 if ($attestationUrl -notmatch "^$([regex]::Escape("$serverUrl/$repository"))/attestations/\d+$") {
 	Write-ReleaseError "Release commit has an invalid attestation URL"
 }

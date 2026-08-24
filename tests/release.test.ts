@@ -65,6 +65,26 @@ $succeeded = Test-NativeCommand { pwsh -NoProfile -NonInteractive -Command 'exit
 		expect(output).toBe("False|0");
 	});
 
+	test("reads exactly one git trailer as a string", async () => {
+		const output = await invokePowerShell(`
+. '${commonScript}'
+$fixture = Join-Path ([IO.Path]::GetTempPath()) ([guid]::NewGuid().ToString())
+try {
+	git init --quiet $fixture
+	git -C $fixture -c user.name=Test -c user.email=test@example.com -c commit.gpgsign=false commit --allow-empty --quiet -m "Release\`n\`nAttestation-URL: https://github.com/dprint/check/attestations/12345678"
+	$value = Get-GitTrailerValue -RepositoryPath $fixture -Key 'Attestation-URL'
+	@{ type = $value.GetType().FullName; value = $value } | ConvertTo-Json -Compress
+}
+finally {
+	Remove-Item -Recurse -Force $fixture
+}
+`);
+		expect(JSON.parse(output)).toEqual({
+			type: "System.String",
+			value: "https://github.com/dprint/check/attestations/12345678",
+		});
+	});
+
 	test("defaults checksum operations to SHA256SUMS", async () => {
 		const output = await invokePowerShell(`
 . '${commonScript}'

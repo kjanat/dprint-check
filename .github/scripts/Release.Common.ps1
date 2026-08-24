@@ -36,6 +36,23 @@ function ConvertFrom-NativeJson([string[]] $Output) {
 	return ($Output -join "`n") | ConvertFrom-Json
 }
 
+function Get-GitTrailerValue {
+	param(
+		[Parameter(Mandatory)] [string] $RepositoryPath,
+		[Parameter(Mandatory)] [ValidatePattern('^[A-Za-z0-9-]+$')] [string] $Key
+	)
+
+	$values = @(
+		git -C $RepositoryPath log -1 "--format=%(trailers:key=$Key,valueonly)" |
+			Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+			ForEach-Object { ([string] $_).Trim() }
+	)
+	if ($values.Count -ne 1) {
+		Write-ReleaseError "Release commit must contain exactly one $Key trailer, found $($values.Count)"
+	}
+	return [string] $values[0]
+}
+
 function Invoke-GitHubApi {
 	param(
 		[Parameter(Mandatory)] [string] $Path,
