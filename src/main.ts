@@ -28,6 +28,7 @@ import {
 import { ACTION_INPUT, ACTION_OUTPUT, ACTION_STATE, ACTION_VALUE, DPRINT, ENVIRONMENT } from "#lib/contracts";
 import { describeError } from "#lib/error";
 import { installDprint } from "#lib/install";
+import { registerProblemMatcher } from "#lib/matcher";
 import { warmupPlugins } from "#lib/warmup";
 
 const pluginCacheDir = (): string => env[ENVIRONMENT.dprintCacheDirectory] ?? join(homedir(), ".cache", DPRINT.name);
@@ -76,7 +77,7 @@ const restorePluginCache = async (
 		await rm(join(cacheDir, DPRINT.remoteCacheDirectory), { recursive: true, force: true });
 		debug("Cleared restored remote files before plugin warmup");
 	}
-	if (await warmupPlugins(binaryPath, config.roots, { debug: debugEnabled })) {
+	if (await warmupPlugins(binaryPath, configRoots, { debug: debugEnabled })) {
 		saveState(ACTION_STATE.pluginCacheReady, ACTION_VALUE.true);
 	}
 };
@@ -146,7 +147,10 @@ const run = async (): Promise<void> => {
 				annotations: annotationsEnabled,
 				debug: debugEnabled,
 			});
-		} else info("dprint installed; check skipped because install-only is true");
+		} else {
+			if (annotationsEnabled) registerProblemMatcher();
+			info("dprint installed; check skipped because install-only is true");
+		}
 	} catch (error) {
 		if (isFormattingFailure(error)) process.exitCode = 1;
 		else setFailed(describeError(error));

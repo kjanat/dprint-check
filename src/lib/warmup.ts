@@ -53,7 +53,8 @@ const warmupConfig = async (
 			info(`Plugin warmup hung (>${WARMUP_TIMEOUT_MS / 1000}s), attempt ${attempt}/${WARMUP_ATTEMPTS}`);
 		}
 	}
-	throw new Error(`Plugin warmup kept hanging after ${WARMUP_ATTEMPTS} attempts`);
+	warning(`Plugin warmup kept hanging after ${WARMUP_ATTEMPTS} attempts; continuing without saving the plugin cache`);
+	return false;
 };
 
 export const warmupPlugins = async (

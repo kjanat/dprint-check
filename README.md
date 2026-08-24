@@ -29,6 +29,9 @@ To disable caching:
   with: { cache: false }
 ```
 
+GitHub Enterprise Server does not provide the cache service this action uses.
+On GHES the action emits a warning and installs dprint without caching.
+
 ### Install only
 
 Set `install-only` to `true` to install dprint and populate its caches without checking formatting. The installed binary is
@@ -39,6 +42,10 @@ added to `PATH` for later steps.
   with: { install-only: true }
 - run: dprint fmt
 ```
+
+With `install-only`, the action registers a problem matcher,
+so a later step that runs `dprint check` still annotates unformatted files.
+Set `annotations` to `false` to skip the registration.
 
 ### Version
 

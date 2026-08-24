@@ -327,17 +327,41 @@ test("materializes and cleans a remote process-plugin graph in the workspace", a
 		if (preparedRoot === undefined) throw new Error("Missing prepared config root");
 		generatedPaths.push(preparedRoot);
 		expect(dirname(preparedRoot)).toBe(root);
-		const rootContents = JSON.parse(await readFile(preparedRoot, "utf8")) as { extends: string };
+		const rootContents = JSON.parse(await readFile(preparedRoot, "utf8")) as { excludes: string[]; extends: string };
 		generatedPaths.push(rootContents.extends);
 		expect(dirname(rootContents.extends)).toBe(root);
+		expect(rootContents.excludes).toEqual(["**/.dprint-check-*.json"]);
 		const processContents = JSON.parse(await readFile(rootContents.extends, "utf8")) as {
 			exec: { cwd: string };
 			plugins: string[];
 		};
 		expect(processContents.exec.cwd).toBe("${configDir}");
 		expect(processContents.plugins).toEqual([processPlugin]);
+		expect(processContents).not.toContainKey("excludes");
 	} finally {
 		await prepared.cleanup();
 	}
 	for (const path of generatedPaths) expect(await Bun.file(path).exists()).toBeFalse();
+});
+
+test("appends the generated-config exclude to existing root excludes", async () => {
+	const root = await workspace();
+	const rootConfig = join(root, "dprint.json");
+	const remoteConfig = "https://example.com/configs/process.json";
+	const processPlugin = `https://plugins.dprint.dev/exec-0.7.3.json@${"a".repeat(64)}`;
+	await writeFile(rootConfig, `{ "excludes": ["dist"], "extends": "${remoteConfig}" }`);
+	const graph = await resolveConfigGraph([rootConfig], {
+		fetch: fetchConfigs({ [remoteConfig]: `{ "plugins": ["${processPlugin}"] }` }),
+	});
+
+	const prepared = await prepareConfigRoots(graph);
+	try {
+		expect(prepared.materialized).toBeTrue();
+		const preparedRoot = prepared.roots[0];
+		if (preparedRoot === undefined) throw new Error("Missing prepared config root");
+		const contents = JSON.parse(await readFile(preparedRoot, "utf8")) as { excludes: string[] };
+		expect(contents.excludes).toEqual(["dist", "**/.dprint-check-*.json"]);
+	} finally {
+		await prepared.cleanup();
+	}
 });

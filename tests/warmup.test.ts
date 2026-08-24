@@ -78,15 +78,21 @@ test("stops after a non-timeout warmup failure", async () => {
 	}
 });
 
-test(`retries a hung warmup ${WARMUP_ATTEMPTS} times`, () => {
+test(`retries a hung warmup ${WARMUP_ATTEMPTS} times, then continues without saving`, async () => {
 	const execute = mock(async () => {
 		throw Object.assign(new Error("timed out"), { killed: true, signal: "SIGTERM" });
 	});
+	const stdout = spyOn(process.stdout, "write").mockImplementation(() => true);
 
-	expect(warmupPlugins(TEST_DPRINT_BINARY, ["dprint.json"], { execute })).rejects.toThrow(
-		`Plugin warmup kept hanging after ${WARMUP_ATTEMPTS} attempts`,
-	);
-	expect(execute).toHaveBeenCalledTimes(WARMUP_ATTEMPTS);
+	try {
+		expect(await warmupPlugins(TEST_DPRINT_BINARY, ["dprint.json"], { execute })).toBeFalse();
+		expect(execute).toHaveBeenCalledTimes(WARMUP_ATTEMPTS);
+		expect(stdout).toHaveBeenCalledWith(
+			`::warning::Plugin warmup kept hanging after ${WARMUP_ATTEMPTS} attempts; continuing without saving the plugin cache\n`,
+		);
+	} finally {
+		stdout.mockRestore();
+	}
 });
 
 test("enables dprint debug logging during plugin warmup", async () => {

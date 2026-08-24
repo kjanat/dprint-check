@@ -1,0 +1,14 @@
+{
+	"problemMatcher": [
+		{
+			"owner": "dprint",
+			"pattern": [
+				{
+					"regexp": "^(from (.+):)$",
+					"message": 1,
+					"file": 2
+				}
+			]
+		}
+	]
+}

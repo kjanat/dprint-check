@@ -8,6 +8,8 @@ import { DPRINT, ENVIRONMENT } from "#lib/contracts";
 import { requestWithRetry, type RetryTransportOptions } from "#lib/http";
 
 const CONFIG_NAMES = ["dprint.json", "dprint.jsonc", ".dprint.json", ".dprint.jsonc"] as const;
+const GENERATED_CONFIG_PREFIX = ".dprint-check-";
+const GENERATED_CONFIG_EXCLUDE = `**/${GENERATED_CONFIG_PREFIX}*.json`;
 const MAX_REDIRECTS = 10;
 
 interface ConfigSource {
@@ -310,7 +312,7 @@ export const prepareConfigRoots = async (config: ConfigGraph): Promise<PreparedC
 	const generated = new Map(
 		config.sources.map(source => [
 			source.source,
-			join(source.remote ? workspacePath() : dirname(source.source), `.dprint-check-${randomUUID()}.json`),
+			join(source.remote ? workspacePath() : dirname(source.source), `${GENERATED_CONFIG_PREFIX}${randomUUID()}.json`),
 		]),
 	);
 	const paths = [...generated.values()];
@@ -338,6 +340,11 @@ export const prepareConfigRoots = async (config: ConfigGraph): Promise<PreparedC
 				value.plugins = value.plugins.map(plugin =>
 					typeof plugin === "string" ? absoluteRemotePlugin(plugin, source.source) : plugin
 				);
+			}
+			if (
+				config.rootSources.includes(source.source) && (value.excludes === undefined || Array.isArray(value.excludes))
+			) {
+				value.excludes = [...(value.excludes ?? []), GENERATED_CONFIG_EXCLUDE];
 			}
 			const path = generated.get(source.source);
 			if (path === undefined) throw new Error(`Missing generated path for dprint config ${source.source}`);
