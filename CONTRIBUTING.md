@@ -65,7 +65,11 @@ the required reviewer and may approve their own dispatch:
 ```sh
 release_repo=dprint/check
 release_reviewer_id="$(gh api user --jq .id)"
-jq -n --argjson id "$release_reviewer_id" '{wait_timer: 0, prevent_self_review: false, reviewers: [{type: "User", id: $id}], deployment_branch_policy: null}' | gh api --method PUT "repos/${release_repo}/environments/release" --input -
+
+jq -n --argjson id "${release_reviewer_id}" '
+{wait_timer: 0, prevent_self_review: false, reviewers: [{type: "User", id: $id}], deployment_branch_policy: null}
+' | gh api --method PUT "repos/${release_repo}/environments/release" --input -
+
 gh api "repos/${release_repo}/environments/release" --jq '{name, protection_rules, deployment_branch_policy}'
 ```
 
