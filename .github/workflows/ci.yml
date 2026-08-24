@@ -33,7 +33,6 @@ jobs:
             if (-not (Test-Path -LiteralPath $file -PathType Leaf)) { throw "Missing $file" }
             node --check $file
           }
-      - uses: kjanat/actionlint@7c5b0a3880b3d29c51072b1e5e0730e5988f8b7d # v1
       - run: bun run --parallel biome:check typecheck test knip
       - name: dprint check (action)
         uses: ./
