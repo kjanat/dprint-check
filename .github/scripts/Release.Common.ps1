@@ -258,6 +258,53 @@ function Get-SourceCommit([string] $Message, [string] $Fallback) {
 	return $Fallback
 }
 
+function Format-ReleaseVerificationCommand {
+	param(
+		[Parameter(Mandatory)] [string] $RepositoryUrl,
+		[Parameter(Mandatory)] [string] $Version,
+		[Parameter(Mandatory)] [string] $SourceSha,
+		[Parameter(Mandatory)] [string[]] $ReleasePath
+	)
+
+	$repository = ([Uri] $RepositoryUrl).AbsolutePath.Trim('/')
+	[void] (Get-ReleaseAssetName -Path $ReleasePath)
+	$lines = @(
+		'release_dir="$(mktemp -d)"'
+		('test "$(gh release view {0} -R {1} --json isDraft --jq .isDraft)" = false' -f $Version, $repository)
+		('test "$(gh api repos/{0}/commits/{1} --jq .commit.verification.verified)" = true' -f $repository, $Version)
+	)
+	foreach ($directory in @(
+			$ReleasePath |
+				ForEach-Object { Split-Path -Parent $_ } |
+				Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+				Sort-Object -Unique
+		)) {
+		$lines += 'mkdir -p "$release_dir/{0}"' -f $directory
+	}
+	foreach ($path in $ReleasePath) {
+		$assetName = Split-Path -Leaf $path
+		$directory = Split-Path -Parent $path
+		$destination = if ([string]::IsNullOrWhiteSpace($directory)) {
+			'$release_dir'
+		}
+		else {
+			'$release_dir/' + $directory
+		}
+		$lines += 'gh release download {0} -R {1} --pattern {2} --dir "{3}"' -f $Version, $repository, $assetName, $destination
+	}
+	$lines += @(
+		'if command -v sha256sum >/dev/null; then'
+		'  (cd "$release_dir" && sha256sum --check SHA256SUMS)'
+		'else'
+		'  (cd "$release_dir" && shasum -a 256 --check SHA256SUMS)'
+		'fi'
+	)
+	foreach ($path in $ReleasePath | Where-Object { $_ -ne (Get-ReleaseChecksumPath) }) {
+		$lines += 'gh attestation verify "$release_dir/{0}" --repo {1} --source-digest {2}' -f $path, $repository, $SourceSha
+	}
+	return $lines -join "`n"
+}
+
 function Format-ReleaseNote {
 	param(
 		[Parameter(Mandatory)] [AllowEmptyCollection()] [object[]] $Commits,
@@ -269,11 +316,14 @@ function Format-ReleaseNote {
 		[Parameter(Mandatory)] [string[]] $ReleasePath
 	)
 
-	$repository = ([Uri] $RepositoryUrl).AbsolutePath.Trim('/')
 	$assetUrl = "$RepositoryUrl/releases/download/$Version"
 	$assetNames = @(Get-ReleaseAssetName -Path $ReleasePath)
 	$assetLinks = @($assetNames | ForEach-Object { "[``$_``]($assetUrl/$_)" })
-	$downloadPatterns = @($assetNames | ForEach-Object { "--pattern $_" }) -join ' '
+	$verificationCommand = Format-ReleaseVerificationCommand `
+		-RepositoryUrl $RepositoryUrl `
+		-Version $Version `
+		-SourceSha $SourceSha `
+		-ReleasePath $ReleasePath
 	$lines = @(
 		'## Provenance and verification'
 		''
@@ -286,14 +336,10 @@ function Format-ReleaseNote {
 		''
 		'Verify the published release and its downloaded assets with GitHub CLI:'
 		''
-		'```sh'
-		"gh release verify $Version -R $repository"
-		"gh release download $Version -R $repository $downloadPatterns"
+		'~~~sh'
+		$verificationCommand
+		'~~~'
 	)
-	$lines += @(
-		$assetNames | ForEach-Object { "gh release verify-asset $Version $_ -R $repository" }
-	)
-	$lines += '```'
 	if ($Commits.Count -eq 0) {
 		return ($lines -join "`n") + "`n`n"
 	}
@@ -312,11 +358,17 @@ function Format-ReleaseReadme {
 		[Parameter(Mandatory)] [string] $Version,
 		[Parameter(Mandatory)] [string] $SourceSha,
 		[Parameter(Mandatory)] [string] $AttestationUrl,
+		[Parameter(Mandatory)] [string[]] $ReleasePath,
 		[string[]] $LicensePath = @()
 	)
 
 	$repository = ([Uri] $RepositoryUrl).AbsolutePath.Trim('/')
 	$shortSourceSha = $SourceSha.Substring(0, 7)
+	$verificationCommand = Format-ReleaseVerificationCommand `
+		-RepositoryUrl $RepositoryUrl `
+		-Version $Version `
+		-SourceSha $SourceSha `
+		-ReleasePath $ReleasePath
 	$lines = @"
 # dprint/check $Version
 
@@ -342,9 +394,7 @@ This is the generated JavaScript Action package for [$Version]($RepositoryUrl/re
 ## Verify
 
 ~~~sh
-gh release verify $Version -R $repository
-gh attestation verify dist/main.mjs --repo $repository --source-digest $SourceSha
-gh attestation verify dist/post.mjs --repo $repository --source-digest $SourceSha
+$verificationCommand
 ~~~
 "@
 	return $lines

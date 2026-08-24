@@ -123,7 +123,7 @@ finally {
 	test("renders a self-contained README for the exact Action tag", async () => {
 		const output = await invokePowerShell(`
 . '${commonScript}'
-$readme = Format-ReleaseReadme -RepositoryUrl 'https://github.com/dprint/check' -Version 'v3.0.0' -SourceSha '1111111111111111111111111111111111111111' -AttestationUrl 'https://github.com/dprint/check/attestations/12345678' -LicensePath @('LICENSE')
+$readme = Format-ReleaseReadme -RepositoryUrl 'https://github.com/dprint/check' -Version 'v3.0.0' -SourceSha '1111111111111111111111111111111111111111' -AttestationUrl 'https://github.com/dprint/check/attestations/12345678' -ReleasePath @('SHA256SUMS', 'dist/main.mjs', 'dist/post.mjs') -LicensePath @('LICENSE')
 $readme | ConvertTo-Json -Compress
 `);
 		const readme = JSON.parse(output) as string;
@@ -138,7 +138,18 @@ $readme | ConvertTo-Json -Compress
 		expect(readme).toContain(
 			"[`LICENSE`](https://github.com/dprint/check/blob/v3.0.0/LICENSE)",
 		);
-		expect(readme).toContain("gh release verify v3.0.0 -R dprint/check");
+		expect(readme).toContain("release_dir=\"$(mktemp -d)\"");
+		expect(readme).toContain(
+			"test \"$(gh release view v3.0.0 -R dprint/check --json isDraft --jq .isDraft)\" = false",
+		);
+		expect(readme).toContain(
+			"gh release download v3.0.0 -R dprint/check --pattern main.mjs --dir \"$release_dir/dist\"",
+		);
+		expect(readme).toContain("(cd \"$release_dir\" && sha256sum --check SHA256SUMS)");
+		expect(readme).toContain(
+			"gh attestation verify \"$release_dir/dist/main.mjs\" --repo dprint/check --source-digest 1111111111111111111111111111111111111111",
+		);
+		expect(readme).not.toContain("gh release verify ");
 	});
 
 	test("builds exact-version release and tag badge URLs", async () => {
@@ -175,7 +186,14 @@ $notes | ConvertTo-Json -Compress
 		expect(notes).toContain(
 			"[`SHA256SUMS`](https://github.com/dprint/check/releases/download/v3.0.0/SHA256SUMS)",
 		);
-		expect(notes).toContain("gh release verify v3.0.0 -R dprint/check");
+		expect(notes).toContain("release_dir=\"$(mktemp -d)\"");
+		expect(notes).toContain(
+			"gh release download v3.0.0 -R dprint/check --pattern action.mjs --dir \"$release_dir/dist\"",
+		);
+		expect(notes).toContain(
+			"gh attestation verify \"$release_dir/dist/action.mjs\" --repo dprint/check --source-digest 1111111111111111111111111111111111111111",
+		);
+		expect(notes).not.toContain("gh release verify ");
 		expect(notes).toContain("## Source changes");
 		expect(notes).toContain(
 			"[`3333333`](https://github.com/dprint/check/commit/3333333333333333333333333333333333333333): Strengthen CI and release verification",

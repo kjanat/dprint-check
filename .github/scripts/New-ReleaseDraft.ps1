@@ -24,6 +24,7 @@ $readme = Format-ReleaseReadme `
 	-Version $version `
 	-SourceSha $sourceSha `
 	-AttestationUrl $attestationUrl `
+	-ReleasePath $releasePaths `
 	-LicensePath $licensePaths
 [IO.File]::WriteAllText($readmePath, $readme, [Text.UTF8Encoding]::new($false))
 $releaseTree = (Invoke-GitHubApi -Method POST -Path 'repos/{owner}/{repo}/git/trees' -Body @{

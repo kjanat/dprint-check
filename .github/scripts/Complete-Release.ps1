@@ -76,6 +76,7 @@ $expectedReadme = Format-ReleaseReadme `
 	-Version $version `
 	-SourceSha $sourceSha `
 	-AttestationUrl $attestationUrl `
+	-ReleasePath $releasePaths `
 	-LicensePath $licensePaths
 $actualReadme = [IO.File]::ReadAllText((Join-Path release 'README.md'))
 if ($actualReadme -cne $expectedReadme) {
