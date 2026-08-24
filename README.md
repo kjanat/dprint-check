@@ -43,10 +43,6 @@ added to `PATH` for later steps.
 - run: dprint fmt
 ```
 
-With `install-only`, the action registers a problem matcher,
-so a later step that runs `dprint check` still annotates unformatted files.
-Set `annotations` to `false` to skip the registration.
-
 ### Version
 
 By default, the action discovers the latest dprint release and selects the published ZIP matching the runner. To use a

@@ -28,7 +28,6 @@ import {
 import { ACTION_INPUT, ACTION_OUTPUT, ACTION_STATE, ACTION_VALUE, DPRINT, ENVIRONMENT } from "#lib/contracts";
 import { describeError } from "#lib/error";
 import { installDprint } from "#lib/install";
-import { registerProblemMatcher } from "#lib/matcher";
 import { warmupPlugins } from "#lib/warmup";
 
 const pluginCacheDir = (): string => env[ENVIRONMENT.dprintCacheDirectory] ?? join(homedir(), ".cache", DPRINT.name);
@@ -147,10 +146,7 @@ const run = async (): Promise<void> => {
 				annotations: annotationsEnabled,
 				debug: debugEnabled,
 			});
-		} else {
-			if (annotationsEnabled) registerProblemMatcher();
-			info("dprint installed; check skipped because install-only is true");
-		}
+		} else info("dprint installed; check skipped because install-only is true");
 	} catch (error) {
 		if (isFormattingFailure(error)) process.exitCode = 1;
 		else setFailed(describeError(error));

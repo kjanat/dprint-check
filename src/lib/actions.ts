@@ -86,8 +86,6 @@ export const exportVariable = (name: string, value: string): void => {
 	if (!fileCommand(ENVIRONMENT.githubEnvironmentFile, name, value)) command("set-env", value, { name });
 };
 
-export const addMatcher = (path: string): void => command("add-matcher", path);
-
 export const addPath = (path: string): void => {
 	env["PATH"] = `${path}${delimiter}${env["PATH"] ?? ""}`;
 	const file = env[ENVIRONMENT.githubPathFile];
