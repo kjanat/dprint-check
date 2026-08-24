@@ -36,10 +36,17 @@ const writeReleaseChecksum: TsdownHooks["build:done"] = async ({ chunks }) => {
 
 const configs = sourceEntrypoints.map(entry => ({
 	entry,
-	minify: "dce-only",
+	minify: true,
 	clean: true,
 	target: "node24",
 	platform: "node",
+	outputOptions: {
+		comments: {
+			legal: true,
+			annotation: false,
+			jsdoc: false,
+		},
+	},
 	env: {
 		NODE_ENV: "production",
 	},
