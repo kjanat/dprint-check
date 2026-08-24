@@ -90,7 +90,7 @@ See GitHub's documentation for [immutable releases], [artifact attestations],
 
    ```sh
    bun pm version patch --no-git-tag-version
-   # Or: minor, major, or an explicit version such as 3.1.0
+   # patch, minor, major, or an explicit version such as 3.1.0
    ```
 
 2. Confirm CI is green and the default-branch HEAD has a verified signature.
@@ -98,7 +98,7 @@ See GitHub's documentation for [immutable releases], [artifact attestations],
    matching `vX.Y.Z` version, either from the Actions page or with GitHub CLI:
 
    ```sh
-   gh workflow run release.yml --ref main -f version=vX.Y.Z
+   gh workflow run release.yml --ref main -f "version=v$(jq -r .version package.json)"
    ```
 
    This workflow dispatch is the only supported way to release. It creates a
