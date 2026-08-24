@@ -1,5 +1,4 @@
-.github/scripts/**                       linguist-vendored=false
-SHA256SUMS                         -diff linguist-generated
-bun.lock                                 linguist-generated
-dist/**                            -diff linguist-generated
-tests/fixtures/release-assets.json -diff linguist-generated
+.github/scripts/**                  linguist-vendored=false
+SHA256SUMS                          linguist-generated
+bun.lock                            linguist-generated
+tests/fixtures/release-assets.json  linguist-generated
