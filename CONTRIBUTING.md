@@ -64,6 +64,7 @@ the required reviewer and may approve their own dispatch:
 
 ```sh
 release_repo=dprint/check
+gh repo set-default "${release_repo}"
 release_reviewer_id="$(gh api user --jq .id)"
 
 jq -n --argjson id "${release_reviewer_id}" '

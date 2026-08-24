@@ -110,16 +110,15 @@ Add-GitHubOutput 'release-sha' $releaseSha
 Add-GitHubOutput 'release-url' $release.html_url
 
 $summaryPath = Get-RequiredEnvironmentVariable 'GITHUB_STEP_SUMMARY'
-$releaseUrl = "$serverUrl/$repository/releases/tag/$version"
 $major = "v$($releaseVersion.Major)"
 $minor = "$major.$($releaseVersion.Minor)"
 $summary = @"
 ## $version prepared
 
-Preparation and pre-publication verification succeeded for [$version]($releaseUrl).
+Preparation and pre-publication verification succeeded.
 
 > [!IMPORTANT]
-> If the publish job is awaiting approval, review the prepared release, then select **Review deployments** at the top of this run and approve the ``release`` environment.
+> If the publish job is awaiting approval, [review the prepared draft]($($release.html_url)), then select **Review deployments** at the top of this run and approve the ``release`` environment.
 >
 > Do not publish the draft manually or dispatch this workflow again. The gated job publishes the release and moves ``$major`` and ``$minor`` only after final verification passes.
 "@
