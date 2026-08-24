@@ -1,35 +1,53 @@
+# yaml-language-server: $schema=https://www.schemastore.org/github-action.json
+---
 name: "dprint-check-action"
-description: "Run `dprint check` on your source code"
-author: "thomaseizinger"
+description: "Install dprint with caching, then check source formatting"
+author: "kjanat"
 inputs:
   dprint-version:
-    description: "Specific dprint version to use (ex. 0.30.3)"
+    description: "Specific dprint version to use (ex. 0.56.1; defaults to latest)"
     required: false
-    default: ""
+    default: "latest"
+  token:
+    description: "GitHub token used to query dprint release metadata"
+    required: false
+    default: "${{ github.token }}"
+  cache:
+    description: "Cache the dprint binary and plugin artifacts"
+    required: false
+    default: "true"
+  install-only:
+    description: "Install dprint and populate its caches without running dprint check"
+    required: false
+    default: "false"
   config-path:
-    description: "Specific dprint config to use (ex. dprint.json)"
+    description: "dprint config path(s), glob(s), or remote HTTP(S) URL(s)"
     required: false
     default: ""
+  annotations:
+    description: "Emit GitHub file annotations for formatting failures"
+    required: false
+    default: "true"
   args:
     description: "Additional arguments to pass to dprint check"
     required: false
     default: ""
+outputs:
+  version:
+    description: "Installed dprint version"
+  location:
+    description: "Path to the installed dprint binary"
+  cache-hit:
+    description: "Whether the dprint binary was restored from cache"
+  plugin-cache-hit:
+    description: "Whether the plugin cache was restored with an exact key"
+  plugin-cache-key:
+    description: "Cache key used for dprint plugins"
 runs:
-  using: "composite"
-  steps:
-    - name: Install dprint
-      shell: bash
-      run: |
-        curl -fsSL https://dprint.dev/install.sh | sh -s ${{ inputs.dprint-version }} > /dev/null 2>&1
-        echo "/home/runner/.dprint/bin" >> $GITHUB_PATH
-    - name: Check formatting
-      shell: bash
-      if: "${{ inputs.config-path == '' }}"
-      run: ~/.dprint/bin/dprint check ${{ inputs.args }}
-    - name: Check formatting with config
-      shell: bash
-      if: "${{ inputs.config-path != '' }}"
-      run: ~/.dprint/bin/dprint check --config '${{ inputs.config-path }}' ${{ inputs.args }}
+  using: "node24"
+  main: "dist/main.mjs"
+  post: "dist/post.mjs"
+  post-if: "always()"
 branding:
   icon: "check-circle"
   color: "gray-dark"
