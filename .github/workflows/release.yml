@@ -6,6 +6,12 @@ on:
   workflow_dispatch:
     inputs:
       version: { description: "Stable semantic version to release (for example, v3.0.0)", required: true, type: string }
+      finalize: {
+        description: "Finalize an existing published release after a failed final verification",
+        default: false,
+        required: false,
+        type: boolean,
+      }
 concurrency: { group: release, queue: single }
 permissions: { contents: read }
 env:
@@ -18,8 +24,11 @@ env:
 defaults: { run: { shell: pwsh } }
 jobs:
   build:
+    if: ${{ !inputs.finalize }}
     runs-on: ubuntu-latest
-    outputs: { attestation-url: "${{ steps.attestation.outputs.attestation-url }}" }
+    outputs:
+      artifact-name: "${{ steps.artifact.outputs.name }}"
+      attestation-url: "${{ steps.attestation.outputs.attestation-url }}"
     permissions:
       artifact-metadata: write
       attestations: write
@@ -36,6 +45,8 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run build
       - run: bun run check
+      - id: artifact
+        run: '"name=$env:CANDIDATE_ARTIFACT" >> $env:GITHUB_OUTPUT'
       - name: Attest release bundle
         id: attestation
         uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
@@ -63,7 +74,7 @@ jobs:
         with: { bun-version-file: package.json }
       - name: Download release candidate
         uses: &download-artifact-action actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
-        with: { name: "${{ env.CANDIDATE_ARTIFACT }}", path: candidate }
+        with: { name: "${{ needs.build.outputs.artifact-name }}", path: candidate }
       - run: bun install --frozen-lockfile
       - name: Verify and independently rebuild release candidate
         env: { GH_TOKEN: "${{ github.token }}" }
@@ -81,7 +92,7 @@ jobs:
         with: { ref: "${{ env.SOURCE_SHA }}" }
       - name: Download verified release candidate
         uses: *download-artifact-action
-        with: { name: "${{ env.CANDIDATE_ARTIFACT }}", path: candidate }
+        with: { name: "${{ needs.build.outputs.artifact-name }}", path: candidate }
       - name: Create signed release commit and draft
         id: release
         env:
@@ -91,6 +102,7 @@ jobs:
 
   publish:
     needs: [build, verify, draft]
+    if: ${{ always() && (inputs.finalize || (needs.build.result == 'success' && needs.verify.result == 'success' && needs.draft.result == 'success')) }}
     runs-on: ubuntu-latest
     environment: {
       name: release,
@@ -101,11 +113,14 @@ jobs:
       contents: write
     steps:
       - uses: *checkout-action
+        if: ${{ !inputs.finalize }}
         with: { ref: "${{ env.SOURCE_SHA }}" }
       - name: Download verified release candidate
+        if: ${{ !inputs.finalize }}
         uses: *download-artifact-action
-        with: { name: "${{ env.CANDIDATE_ARTIFACT }}", path: candidate }
+        with: { name: "${{ needs.build.outputs.artifact-name }}", path: candidate }
       - name: Publish approved release
+        if: ${{ !inputs.finalize }}
         env:
           GH_TOKEN: "${{ github.token }}"
           RELEASE_SHA: "${{ needs.draft.outputs.release-sha }}"

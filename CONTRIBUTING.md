@@ -129,8 +129,10 @@ See GitHub's documentation for [immutable releases], [artifact attestations],
 
 Do not create or move release tags manually. If draft preparation fails, inspect
 the failed job before retrying, and do not retry the same version while a draft
-exists. If publication or final verification fails, leave the floating tags
-unchanged, investigate the failure, and do not bypass the verification job.
+exists. If final verification fails after publication, investigate and fix the
+failure, then dispatch the same exact version with `finalize` enabled. Recovery
+remains protected by the `release` environment and repeats every final check
+before moving floating tags.
 
 [immutable releases]: https://docs.github.com/en/code-security/how-tos/secure-your-supply-chain/establish-provenance-and-integrity/prevent-release-changes
 [artifact attestations]: https://docs.github.com/en/actions/how-tos/secure-your-work/use-artifact-attestations/use-artifact-attestations
