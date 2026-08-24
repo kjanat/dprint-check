@@ -1,6 +1,6 @@
 {
 	"name": "dprint-check-action",
-	"version": "3.0.14",
+	"version": "3.0.0",
 	"private": true,
 	"description": "GitHub Action to install dprint with caching and check formatting",
 	"type": "module",
@@ -18,9 +18,9 @@
 	"repository": "https://github.com/dprint/check",
 	"scripts": {
 		"biome:check": "biome check",
-		"build": "run --runtime=bun tsdown",
-		"build:watch": "run -q build --watch",
-		"check": "run --parallel fmt:check biome:check typecheck test knip",
+		"build": "bun --bun tsdown",
+		"build:watch": "bun --bun tsdown --watch",
+		"check": "bun run --parallel fmt:check biome:check typecheck test knip",
 		"fmt": "bunx --silent dprint fmt",
 		"fmt:check": "if [[ \"${CI}\" == \"true\" ]]; then echo 'Skipping dprint in CI to avoid pre-populating its cache'; else bunx --silent dprint check; fi",
 		"fixtures:update": "bun run tests/generate-dprint-fixtures.ts",
@@ -39,7 +39,6 @@
 		"@types/bun": "^1.4",
 		"@types/node": "^24",
 		"knip": "^6.32.2",
-		"runner-run": "^0.25.1",
 		"tsdown": ">=0.22",
 		"typescript": "^7"
 	},
