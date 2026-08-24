@@ -2,7 +2,7 @@
 ---
 name: "dprint-check-action"
 description: "Install dprint with caching, then check source formatting"
-author: "thomaseizinger"
+author: "kjanat"
 inputs:
   dprint-version:
     description: "Specific dprint version to use (ex. 0.56.1; defaults to latest)"
