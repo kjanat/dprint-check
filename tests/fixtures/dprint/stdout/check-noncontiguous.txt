@@ -1,0 +1,13 @@
+from /workspace/noncontiguous.ts:
+  1|-export·const·first={value:1}
+1  |+export·const·first·=·{·value:·1·};
+2 2| 
+3 3| const·untouchedOne·=·1;
+4 4| const·untouchedTwo·=·2;
+...
+ 7  7| const·untouchedFive·=·5;
+ 8  8| const·untouchedSix·=·6;
+ 9  9| 
+   10|-export·const·second={value:2}
+10   |+export·const·second·=·{·value:·2·};
+--

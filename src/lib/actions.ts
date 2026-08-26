@@ -10,6 +10,13 @@ interface InputOptions {
 	trimWhitespace?: boolean;
 }
 
+interface AnnotationProperties {
+	endLine?: number;
+	file?: string;
+	line?: number;
+	title?: string;
+}
+
 const escapeData = (value: string): string =>
 	value.replaceAll("%", "%25").replaceAll("\r", "%0D").replaceAll("\n", "%0A");
 
@@ -46,7 +53,17 @@ export const info = (message: string): void => void process.stdout.write(`${mess
 
 export const warning = (message: string): void => command("warning", message);
 
-export const error = (message: string): void => command("error", message);
+export const error = (message: string, properties: AnnotationProperties = {}): void => {
+	command(
+		"error",
+		message,
+		Object.fromEntries(
+			Object.entries(properties)
+				.filter((entry): entry is [string, string | number] => entry[1] !== undefined)
+				.map(([key, value]) => [key, String(value)]),
+		),
+	);
+};
 
 export const setFailed = (message: string): void => {
 	process.exitCode = 1;

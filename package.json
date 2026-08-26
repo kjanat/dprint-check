@@ -19,6 +19,7 @@
 		"check": "npm run fmt:check && npm run biome:check && npm run typecheck && npm test && npm run knip",
 		"fmt": "dprint fmt",
 		"fmt:check": "if [ \"${CI}\" = \"true\" ]; then echo 'Skipping dprint in CI to avoid pre-populating its cache'; else dprint check; fi",
+		"fixtures:update": "node tests/generate-dprint-fixtures.ts",
 		"test": "node --test \"tests/**/*.test.ts\"",
 		"knip": "knip",
 		"typecheck": "tsc --noEmit"

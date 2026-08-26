@@ -1,6 +1,8 @@
 # dprint check action
 
 This action installs dprint, caches the binary and plugin artifacts, then runs `dprint check`.
+Formatting failures are emitted as GitHub file annotations while retaining dprint's diff in the job log.
+Set `annotations` to `false` to retain only the job-log output.
 
 ## Usage
 
@@ -40,6 +42,9 @@ added to `PATH` for later steps.
   with: { install-only: true }
 - run: dprint fmt
 ```
+
+File annotations are only emitted for the check the action runs itself; a `dprint check` in a later step prints its
+regular output without annotations.
 
 ### Version
 
@@ -108,6 +113,7 @@ E.g. to only check changed files:
 | `cache`          | `true`          | Cache the binary and plugin artifacts         |
 | `install-only`   | `false`         | Install without running `dprint check`        |
 | `config-path`    | auto-discovered | Config path(s), glob(s), or HTTP(S) URL(s)    |
+| `annotations`    | `true`          | Emit annotations for formatting failures      |
 | `args`           |                 | Additional arguments passed to `dprint check` |
 
 ## Outputs

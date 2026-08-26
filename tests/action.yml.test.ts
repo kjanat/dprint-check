@@ -50,6 +50,7 @@ expectTypeOf<DeclaredManifest["runs"]["using"]>().toEqualTypeOf<"node24">();
 expectTypeOf<DeclaredManifest["inputs"]["token"]["default"]>().toEqualTypeOf<"${{ github.token }}">();
 expectTypeOf<DeclaredManifest["inputs"]["cache"]["default"]>().toEqualTypeOf<"true">();
 expectTypeOf<DeclaredManifest["inputs"]["install-only"]["default"]>().toEqualTypeOf<"false">();
+expectTypeOf<DeclaredManifest["inputs"]["annotations"]["default"]>().toEqualTypeOf<"true">();
 
 describe("action metadata", () => {
 	test("uses Node.js 24 with an always-running post step", () => {
@@ -71,6 +72,7 @@ describe("action metadata", () => {
 		[ACTION_INPUT.cache, ACTION_VALUE.true],
 		[ACTION_INPUT.installOnly, ACTION_VALUE.false],
 		[ACTION_INPUT.configPath, ""],
+		[ACTION_INPUT.annotations, ACTION_VALUE.true],
 		[ACTION_INPUT.args, ""],
 	] as const;
 

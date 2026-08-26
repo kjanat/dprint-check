@@ -1,4 +1,5 @@
 export const ACTION_INPUT = {
+	annotations: "annotations",
 	args: "args",
 	cache: "cache",
 	configPath: "config-path",
@@ -53,6 +54,7 @@ export const DPRINT = {
 	command: {
 		check: "check",
 		config: "--config",
+		listDifferent: "--list-different",
 		logLevel: "--log-level",
 		version: "--version",
 		warmup: "output-file-paths",

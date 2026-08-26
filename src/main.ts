@@ -91,6 +91,7 @@ const run = async (): Promise<void> => {
 		const additionalArgs = getInput(ACTION_INPUT.args, { trimWhitespace: false });
 		const cacheEnabled = getInput(ACTION_INPUT.cache) !== ACTION_VALUE.false;
 		const installOnly = getInput(ACTION_INPUT.installOnly) === ACTION_VALUE.true;
+		const annotationsEnabled = getInput(ACTION_INPUT.annotations) !== ACTION_VALUE.false;
 		const debugEnabled = isDebug();
 		const cacheDir = pluginCacheDir();
 		debug(
@@ -98,7 +99,9 @@ const run = async (): Promise<void> => {
 				token === "" ? "not provided" : "provided"
 			}; ${ACTION_INPUT.cache}=${cacheEnabled}; ${ACTION_INPUT.installOnly}=${installOnly}; ${ACTION_INPUT.configPath}=${
 				configPathInput || "auto"
-			}; ${ACTION_INPUT.args}=${additionalArgs === "" ? "none" : "provided"}`,
+			}; ${ACTION_INPUT.annotations}=${annotationsEnabled}; ${ACTION_INPUT.args}=${
+				additionalArgs === "" ? "none" : "provided"
+			}`,
 		);
 		debug(`Plugin cache directory: ${cacheDir}`);
 		exportVariable(ENVIRONMENT.dprintCacheDirectory, cacheDir);
@@ -139,7 +142,10 @@ const run = async (): Promise<void> => {
 			const checkRoots = configPathInput === "" && preparedConfig?.materialized !== true
 				? [""]
 				: (preparedConfig?.roots ?? []);
-			await checkConfigurations(location, checkRoots, additionalArgs, { debug: debugEnabled });
+			await checkConfigurations(location, checkRoots, additionalArgs, {
+				annotations: annotationsEnabled,
+				debug: debugEnabled,
+			});
 		} else info("dprint installed; check skipped because install-only is true");
 	} catch (error) {
 		if (isFormattingFailure(error)) process.exitCode = 1;
