@@ -1,0 +1,151 @@
+# yaml-language-server: $schema=https://www.schemastore.org/github-workflow.json
+---
+name: Release
+run-name: Release ${{ inputs.version }} from ${{ github.sha }}
+on:
+  workflow_dispatch:
+    inputs:
+      version: { description: "Stable semantic version to release (for example, v3.0.0)", required: true, type: string }
+      finalize: {
+        description: "Finalize an existing published release after a failed final verification",
+        default: false,
+        required: false,
+        type: boolean,
+      }
+concurrency: { group: release, queue: single }
+permissions: { contents: read }
+env:
+  CANDIDATE_ARTIFACT: release-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+  DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+  GH_REPO: ${{ github.repository }}
+  NODE_VERSION: "24"
+  OWNER: ${{ github.repository_owner }}
+  SOURCE_SHA: ${{ github.sha }}
+  VERSION: ${{ inputs.version }}
+defaults: { run: { shell: pwsh } }
+jobs:
+  build:
+    if: ${{ !inputs.finalize }}
+    runs-on: ubuntu-latest
+    outputs:
+      artifact-name: "${{ steps.artifact.outputs.name }}"
+      attestation-url: "${{ steps.attestation.outputs.attestation-url }}"
+    permissions:
+      artifact-metadata: write
+      attestations: write
+      contents: read
+      id-token: write
+    steps:
+      - uses: &checkout-action actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with: { ref: "${{ env.SOURCE_SHA }}" }
+      - uses: &setup-node-action actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with: { node-version: "${{ env.NODE_VERSION }}", cache: npm }
+      - name: Validate release request
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: ./.github/scripts/Test-ReleaseRequest.ps1
+      - run: npm ci
+      - run: npm run build
+      - run: npm run check
+      - id: artifact
+        run: '"name=$env:CANDIDATE_ARTIFACT" >> $env:GITHUB_OUTPUT'
+      - name: Attest release bundle
+        id: attestation
+        uses: actions/attest@1e69f48acb82d1966a394da916b4c1698aa569d6 # v4
+        with: { subject-checksums: SHA256SUMS }
+      - name: Upload release candidate
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: ${{ env.CANDIDATE_ARTIFACT }}
+          path: |
+            dist/
+            SHA256SUMS
+          if-no-files-found: error
+          retention-days: 1
+
+  verify:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      attestations: read
+      contents: read
+    steps:
+      - uses: *checkout-action
+        with: { ref: "${{ env.SOURCE_SHA }}" }
+      - uses: *setup-node-action
+        with: { node-version: "${{ env.NODE_VERSION }}", cache: npm }
+      - name: Download release candidate
+        uses: &download-artifact-action actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with: { name: "${{ needs.build.outputs.artifact-name }}", path: candidate }
+      - run: npm ci
+      - name: Verify and independently rebuild release candidate
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: ./.github/scripts/Test-ReleaseCandidate.ps1
+
+  draft:
+    needs: [build, verify]
+    runs-on: ubuntu-latest
+    outputs:
+      release-sha: "${{ steps.release.outputs.release-sha }}"
+      release-url: "${{ steps.release.outputs.release-url }}"
+    permissions: { contents: write }
+    steps:
+      - uses: *checkout-action
+        with: { ref: "${{ env.SOURCE_SHA }}" }
+      - name: Download verified release candidate
+        uses: *download-artifact-action
+        with: { name: "${{ needs.build.outputs.artifact-name }}", path: candidate }
+      - name: Create signed release commit and draft
+        id: release
+        env:
+          ATTESTATION_URL: "${{ needs.build.outputs.attestation-url }}"
+          GH_TOKEN: "${{ github.token }}"
+        run: ./.github/scripts/New-ReleaseDraft.ps1
+
+  publish:
+    needs: [build, verify, draft]
+    if: ${{ always() && (inputs.finalize || (needs.build.result == 'success' && needs.verify.result == 'success' && needs.draft.result == 'success')) }}
+    runs-on: ubuntu-latest
+    environment: {
+      name: release,
+      url: "${{ github.server_url }}/${{ github.repository }}/releases/tag/${{ env.VERSION }}",
+    }
+    permissions:
+      attestations: read
+      contents: write
+    steps:
+      - uses: *checkout-action
+        if: ${{ !inputs.finalize }}
+        with: { ref: "${{ env.SOURCE_SHA }}" }
+      - name: Download verified release candidate
+        if: ${{ !inputs.finalize }}
+        uses: *download-artifact-action
+        with: { name: "${{ needs.build.outputs.artifact-name }}", path: candidate }
+      - name: Publish approved release
+        if: ${{ !inputs.finalize }}
+        env:
+          GH_TOKEN: "${{ github.token }}"
+          RELEASE_SHA: "${{ needs.draft.outputs.release-sha }}"
+          RELEASE_URL: "${{ needs.draft.outputs.release-url }}"
+        run: ./.github/scripts/Publish-Release.ps1
+      - uses: *checkout-action
+        with:
+          fetch-depth: 0
+          path: release
+          ref: "refs/tags/${{ env.VERSION }}"
+      - name: Read source commit
+        id: source
+        run: |
+          "sha=$(git -C release rev-parse HEAD^)" >> $env:GITHUB_OUTPUT
+      - uses: *checkout-action
+        with:
+          path: source
+          ref: "${{ steps.source.outputs.sha }}"
+      - uses: *checkout-action
+        with:
+          path: automation
+          ref: "${{ env.DEFAULT_BRANCH }}"
+      - uses: *setup-node-action
+        with: { node-version: "${{ env.NODE_VERSION }}", cache: npm, cache-dependency-path: source/package-lock.json }
+      - name: Verify immutable release and move floating tags
+        env: { GH_TOKEN: "${{ github.token }}" }
+        run: ./automation/.github/scripts/Complete-Release.ps1

@@ -1,3 +1,4 @@
 node_modules/
 # Generated only by the release workflow and committed to release tags.
 /dist/
+/SHA256SUMS

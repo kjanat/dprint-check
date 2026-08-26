@@ -87,8 +87,16 @@ describe("action metadata", () => {
 	});
 });
 
-test("bundles exactly the configured entrypoints", async () => {
+test("checksum manifest covers the bundle and configured entrypoints", async () => {
 	const files = await readdir(join(root, "dist"), { withFileTypes: true });
 	const bundlePaths = files.filter(file => file.isFile()).map(file => `dist/${file.name}`).toSorted();
 	assert.deepStrictEqual(bundlePaths, [action.runs.main, action.runs.post].toSorted());
+	const checksums = (await readFile(join(root, "SHA256SUMS"), "utf8"))
+		.trim()
+		.split(/\r?\n/);
+	const releasePaths = checksums.map(line => {
+		assert.match(line, /^[0-9a-f]{64} {2}.+$/);
+		return line.slice(66);
+	});
+	assert.deepStrictEqual(releasePaths.toSorted(), bundlePaths);
 });

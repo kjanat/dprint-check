@@ -1,3 +1,5 @@
+.github/scripts/**                  linguist-vendored=false
 .zed/*.json                         linguist-language=JSONC
+SHA256SUMS                          linguist-generated
 package-lock.json                   linguist-generated
 tests/fixtures/release-assets.json  linguist-generated
