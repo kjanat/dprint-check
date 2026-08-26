@@ -2,29 +2,17 @@
 
 ## Development
 
-Install the locked dependencies with Bun 1.4.0, then run the same checks used by CI:
+Install the locked dependencies with npm, then run the same checks used by CI:
 
 ```sh
-bun install --frozen-lockfile
-bun run build
-bun run check
+npm ci
+npm run build
+npm run check
 ```
 
 The generated `dist/` directory is intentionally ignored. Do not commit it to
 the default branch. Release automation builds it from reviewed source and adds
 it only to generated release commits.
-
-## Updating Bun
-
-To update the repository's pinned Bun version:
-
-```sh
-bun upgrade --stable
-bun pm pkg set "packageManager=bun@$(bun --version)"
-bun install
-bun run build
-bun run check
-```
 
 ## Release references
 
@@ -89,7 +77,7 @@ See GitHub's documentation for [immutable releases], [artifact attestations],
    into the default branch.
 
    ```sh
-   bun pm version patch --no-git-tag-version
+   npm version patch --no-git-tag-version
    # patch, minor, major, or an explicit version such as 3.1.0
    ```
 

@@ -12,7 +12,7 @@ type JavaScriptActionOutput = Readonly<{
 declare const action: Readonly<{
 	name: "dprint-check-action";
 	description: "Install dprint with caching, then check source formatting";
-	author: "thomaseizinger";
+	author: "kjanat";
 	inputs: Readonly<{
 		"dprint-version": ActionInput<"latest">;
 		token: ActionInput<"${{ github.token }}">;

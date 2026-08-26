@@ -1,6 +1,7 @@
-import { describe, expect, spyOn, test } from "bun:test";
+import assert from "node:assert/strict";
 import { readFile, writeFile } from "node:fs/promises";
 import { delimiter, join } from "node:path";
+import { describe, test } from "node:test";
 
 import {
 	addPath,
@@ -24,9 +25,9 @@ const context = useTestContext();
 test("reads action inputs with the toolkit's whitespace behavior", () => {
 	context.setEnvironment("INPUT_CONFIG-PATH", "  configs/dprint.json  \n");
 
-	expect(getInput(ACTION_INPUT.configPath)).toBe("configs/dprint.json");
-	expect(getInput(ACTION_INPUT.configPath, { trimWhitespace: false })).toBe("  configs/dprint.json  \n");
-	expect(getInput("missing")).toBeEmpty();
+	assert.strictEqual(getInput(ACTION_INPUT.configPath), "configs/dprint.json");
+	assert.strictEqual(getInput(ACTION_INPUT.configPath, { trimWhitespace: false }), "  configs/dprint.json  \n");
+	assert.strictEqual(getInput("missing"), "");
 });
 
 describe("GitHub file commands", () => {
@@ -43,10 +44,12 @@ describe("GitHub file commands", () => {
 		setOutput("details", "first\nsecond");
 		saveState("cache-key", "dprint\nplugins");
 
-		expect(await readFile(outputFile, "utf8")).toMatch(
+		assert.match(
+			await readFile(outputFile, "utf8"),
 			/^cache-hit<<dprint_[^\n]+\ntrue\ndprint_[^\n]+\ndetails<<dprint_[^\n]+\nfirst\nsecond\ndprint_[^\n]+\n$/,
 		);
-		expect(await readFile(stateFile, "utf8")).toMatch(
+		assert.match(
+			await readFile(stateFile, "utf8"),
 			/^cache-key<<dprint_[^\n]+\ndprint\nplugins\ndprint_[^\n]+\n$/,
 		);
 	});
@@ -65,60 +68,58 @@ describe("GitHub file commands", () => {
 		exportVariable(ENVIRONMENT.dprintCacheDirectory, "/cache/dprint");
 		addPath(TEST_DPRINT_BINARY);
 
-		expect(process.env[ENVIRONMENT.dprintCacheDirectory]).toBe("/cache/dprint");
-		expect(await readFile(environmentFile, "utf8")).toMatch(
+		assert.strictEqual(process.env[ENVIRONMENT.dprintCacheDirectory], "/cache/dprint");
+		assert.match(
+			await readFile(environmentFile, "utf8"),
 			new RegExp(
 				`^${ENVIRONMENT.dprintCacheDirectory}<<dprint_[^\\n]+\\n/cache/dprint\\ndprint_[^\\n]+\\n$`,
 			),
 		);
-		expect(process.env["PATH"]).toBe(`${TEST_DPRINT_BINARY}${delimiter}/existing/path`);
-		expect(await readFile(pathFile, "utf8")).toBe(`${TEST_DPRINT_BINARY}\n`);
+		assert.strictEqual(process.env["PATH"], `${TEST_DPRINT_BINARY}${delimiter}/existing/path`);
+		assert.strictEqual(await readFile(pathFile, "utf8"), `${TEST_DPRINT_BINARY}\n`);
 	});
 });
 
 test("reads action state", () => {
 	context.setEnvironment("STATE_CACHE_KEY", "dprint-cache-key");
-	expect(getState("CACHE_KEY")).toBe("dprint-cache-key");
+	assert.strictEqual(getState("CACHE_KEY"), "dprint-cache-key");
 });
 
 test("detects runner debug mode", () => {
 	context.setEnvironment(ENVIRONMENT.runnerDebug, "1");
-	expect(isDebug()).toBeTrue();
+	assert.strictEqual(isDebug(), true);
 	context.setEnvironment(ENVIRONMENT.runnerDebug, "0");
-	expect(isDebug()).toBeFalse();
+	assert.strictEqual(isDebug(), false);
 });
 
-test("emits escaped workflow commands when file commands are unavailable", () => {
+test("emits escaped workflow commands when file commands are unavailable", t => {
 	context.setEnvironment(ENVIRONMENT.githubOutputFile, undefined);
 	context.setEnvironment(ENVIRONMENT.githubStateFile, undefined);
 	context.setEnvironment(ENVIRONMENT.githubEnvironmentFile, undefined);
 	context.setEnvironment(ENVIRONMENT.githubPathFile, undefined);
 	context.setEnvironment(ENVIRONMENT.dprintCacheDirectory, undefined);
 	context.setEnvironment("PATH", "/existing/path");
-	const write = spyOn(process.stdout, "write").mockImplementation(() => true);
-	try {
-		setSecret("secret%\r\n");
-		debug("detail");
-		info("plain");
-		warning("careful");
-		error("bad line\n", { file: "src/a:b,c%.ts", line: 12, endLine: 14, title: "dprint: check" });
-		setOutput("result:,", "line one\nline two");
-		saveState("cache-key", "state");
-		exportVariable(ENVIRONMENT.dprintCacheDirectory, "/cache");
-		addPath("/tools");
+	const write = t.mock.method(process.stdout, "write", () => true);
 
-		expect(write.mock.calls.map(([message]) => message)).toEqual([
-			"::add-mask::secret%25%0D%0A\n",
-			"::debug::detail\n",
-			"plain\n",
-			"::warning::careful\n",
-			"::error file=src/a%3Ab%2Cc%25.ts,line=12,endLine=14,title=dprint%3A check::bad line%0A\n",
-			"::set-output name=result%3A%2C::line one%0Aline two\n",
-			"::save-state name=cache-key::state\n",
-			`::set-env name=${ENVIRONMENT.dprintCacheDirectory}::/cache\n`,
-			"::add-path::/tools\n",
-		]);
-	} finally {
-		write.mockRestore();
-	}
+	setSecret("secret%\r\n");
+	debug("detail");
+	info("plain");
+	warning("careful");
+	error("bad line\n", { file: "src/a:b,c%.ts", line: 12, endLine: 14, title: "dprint: check" });
+	setOutput("result:,", "line one\nline two");
+	saveState("cache-key", "state");
+	exportVariable(ENVIRONMENT.dprintCacheDirectory, "/cache");
+	addPath("/tools");
+
+	assert.deepStrictEqual(write.mock.calls.map(call => call.arguments[0]), [
+		"::add-mask::secret%25%0D%0A\n",
+		"::debug::detail\n",
+		"plain\n",
+		"::warning::careful\n",
+		"::error file=src/a%3Ab%2Cc%25.ts,line=12,endLine=14,title=dprint%3A check::bad line%0A\n",
+		"::set-output name=result%3A%2C::line one%0Aline two\n",
+		"::save-state name=cache-key::state\n",
+		`::set-env name=${ENVIRONMENT.dprintCacheDirectory}::/cache\n`,
+		"::add-path::/tools\n",
+	]);
 });

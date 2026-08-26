@@ -1,6 +1,7 @@
-import { describe, expect, mock, test } from "bun:test";
+import assert from "node:assert/strict";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { describe, test } from "node:test";
 
 import {
 	AZURE_STORAGE_API_VERSION,
@@ -26,45 +27,48 @@ const cacheServiceEnvironment = {
 };
 
 describe("cache availability", () => {
-	test.each(
-		[
-			{
-				name: "GitHub-hosted v2 service",
-				environment: {
-					[ENVIRONMENT.githubServerUrl]: GITHUB_API.webUrl,
-					...cacheServiceEnvironment,
-				},
-				expected: true,
+	const cases = [
+		{
+			name: "GitHub-hosted v2 service",
+			environment: {
+				[ENVIRONMENT.githubServerUrl]: GITHUB_API.webUrl,
+				...cacheServiceEnvironment,
 			},
-			{
-				name: "missing runtime token",
-				environment: {
-					[ENVIRONMENT.githubServerUrl]: GITHUB_API.webUrl,
-					[ENVIRONMENT.actionsResultsUrl]: RESULTS_URL,
-				},
-				expected: false,
+			expected: true,
+		},
+		{
+			name: "missing runtime token",
+			environment: {
+				[ENVIRONMENT.githubServerUrl]: GITHUB_API.webUrl,
+				[ENVIRONMENT.actionsResultsUrl]: RESULTS_URL,
 			},
-			{
-				name: "GHES v1 service",
-				environment: {
-					[ENVIRONMENT.githubServerUrl]: "https://github.example.com",
-					...cacheServiceEnvironment,
-				},
-				expected: false,
+			expected: false,
+		},
+		{
+			name: "GHES v1 service",
+			environment: {
+				[ENVIRONMENT.githubServerUrl]: "https://github.example.com",
+				...cacheServiceEnvironment,
 			},
-		] as const,
-	)("reports $name", ({ environment, expected }) => {
-		expect(isCacheAvailable(environment)).toBe(expected);
-	});
+			expected: false,
+		},
+	] as const;
+
+	for (const { name, environment, expected } of cases) {
+		test(`reports ${name}`, () => {
+			assert.strictEqual(isCacheAvailable(environment), expected);
+		});
+	}
 
 	test("matches actions/cache's version hash", () => {
-		expect(cacheVersion(["/workspace/.cache/dprint"], CACHE_COMPRESSION.zstd)).toBe(
+		assert.strictEqual(
+			cacheVersion(["/workspace/.cache/dprint"], CACHE_COMPRESSION.zstd),
 			"979a993c2384ea042ce6dd2bd47ca935ddb2248a5a8759bd4fdd358701a07242",
 		);
 	});
 });
 
-test("saves and restores an exact directory through the v2 protocol", async () => {
+test("saves and restores an exact directory through the v2 protocol", async t => {
 	const root = await context.temporaryDirectory("dprint-cache-test-");
 	const workspace = join(root, "workspace");
 	const cachePath = join(root, "cache");
@@ -75,7 +79,7 @@ test("saves and restores an exact directory through the v2 protocol", async () =
 	const serviceRequests: Array<{ method: string; body: Record<string, unknown> }> = [];
 	const blocks = new Map<string, Uint8Array>();
 	let archive = new Uint8Array();
-	const fetch = mock(async (input: string | URL, init?: RequestInit): Promise<Response> => {
+	const fetch = t.mock.fn(async (input: string | URL, init?: RequestInit): Promise<Response> => {
 		const url = new URL(String(input));
 		const method = url.pathname.split("/").pop() ?? "";
 		if (url.hostname === "results.example") {
@@ -111,72 +115,86 @@ test("saves and restores an exact directory through the v2 protocol", async () =
 		[ENVIRONMENT.runnerTemporaryDirectory]: join(root, "temp"),
 		...cacheServiceEnvironment,
 	};
-	const options = { debug: mock(() => {}), environment, fetch, maskSecret: mock(() => {}) };
+	const options = {
+		debug: t.mock.fn(() => {}),
+		environment,
+		fetch,
+		maskSecret: t.mock.fn(() => {}),
+	};
 
 	await saveCache([cachePath], "plugin-cache-primary", options);
 	await rm(cachePath, { recursive: true });
-	expect(await restoreCache([cachePath], "plugin-cache-primary", ["plugin-cache-"], options)).toBe(
+	assert.strictEqual(
+		await restoreCache([cachePath], "plugin-cache-primary", ["plugin-cache-"], options),
 		"plugin-cache-restore-hit",
 	);
-	expect(await readFile(join(cachePath, "plugin.wasm"), "utf8")).toBe("cached plugin");
-	expect(serviceRequests.map(request => request.method)).toEqual([
+	assert.strictEqual(await readFile(join(cachePath, "plugin.wasm"), "utf8"), "cached plugin");
+	assert.deepStrictEqual(serviceRequests.map(request => request.method), [
 		CACHE_SERVICE_METHOD.create,
 		CACHE_SERVICE_METHOD.finalize,
 		CACHE_SERVICE_METHOD.restore,
 	]);
-	expect(serviceRequests[2]?.body).toMatchObject({
-		key: "plugin-cache-primary",
-		restore_keys: ["plugin-cache-"],
-	});
-	expect(serviceRequests[2]?.body.version).toBe(serviceRequests[0]?.body.version);
-	expect(Number(serviceRequests[1]?.body.size_bytes)).toBePositive();
-	expect(blocks.size).toBePositive();
-	expect(options.maskSecret).toHaveBeenCalledTimes(2);
-	expect(options.maskSecret).toHaveBeenNthCalledWith(1, BLOB_URL);
-	expect(options.maskSecret).toHaveBeenNthCalledWith(2, BLOB_URL);
+	assert.strictEqual(serviceRequests[2]?.body.key, "plugin-cache-primary");
+	assert.deepStrictEqual(serviceRequests[2]?.body.restore_keys, ["plugin-cache-"]);
+	assert.strictEqual(serviceRequests[2]?.body.version, serviceRequests[0]?.body.version);
+	assert.ok(Number(serviceRequests[1]?.body.size_bytes) > 0);
+	assert.ok(blocks.size > 0);
+	assert.strictEqual(options.maskSecret.mock.callCount(), 2);
+	assert.deepStrictEqual(options.maskSecret.mock.calls[0]?.arguments, [BLOB_URL]);
+	assert.deepStrictEqual(options.maskSecret.mock.calls[1]?.arguments, [BLOB_URL]);
 });
 
-test("honors cache-mode before executing or requesting anything", async () => {
-	const execute = mock(async () => {
+test("honors cache-mode before executing or requesting anything", async t => {
+	const execute = t.mock.fn(async () => {
 		throw new Error("should not execute");
 	});
-	const fetch = mock(async () => {
+	const fetch = t.mock.fn(async () => {
 		throw new Error("should not fetch");
 	});
 	const environment = { [ENVIRONMENT.actionsCacheMode]: CACHE_MODE.none };
 
-	expect(restoreCache(["cache"], "key", [], { environment, execute, fetch })).resolves.toBeUndefined();
-	expect(saveCache(["cache"], "key", { environment, execute, fetch })).resolves.toBeUndefined();
-	expect(execute).not.toHaveBeenCalled();
-	expect(fetch).not.toHaveBeenCalled();
+	assert.strictEqual(await restoreCache(["cache"], "key", [], { environment, execute, fetch }), undefined);
+	assert.strictEqual(await saveCache(["cache"], "key", { environment, execute, fetch }), undefined);
+	assert.strictEqual(execute.mock.callCount(), 0);
+	assert.strictEqual(fetch.mock.callCount(), 0);
 });
 
-test.each([408, 429, 503])("retries transient HTTP %i cache-service failures", status => {
-	const fetch = mock()
-		.mockResolvedValueOnce(Response.json({ msg: "temporary failure" }, { status }))
-		.mockResolvedValueOnce(Response.json({ ok: false }));
-	const execute = mock(async () => {});
-	const sleep = mock(async () => {});
-	const debug = mock(() => {});
+for (const status of [408, 429, 503]) {
+	test(`retries transient HTTP ${String(status)} cache-service failures`, async t => {
+		const responses = [
+			Response.json({ msg: "temporary failure" }, { status }),
+			Response.json({ ok: false }),
+		];
+		const fetch = t.mock.fn(async (): Promise<Response> => {
+			const response = responses.shift();
+			if (response === undefined) throw new Error("Unexpected request");
+			return response;
+		});
+		const execute = t.mock.fn(async () => {});
+		const sleep = t.mock.fn(async () => {});
+		const debug = t.mock.fn(() => {});
+		const environment = cacheServiceEnvironment;
+
+		assert.strictEqual(
+			await restoreCache(["cache"], "key", [], { debug, environment, execute, fetch, sleep }),
+			undefined,
+		);
+		assert.strictEqual(fetch.mock.callCount(), 2);
+		assert.strictEqual(sleep.mock.callCount(), 1);
+		assert.strictEqual(debug.mock.callCount(), 1);
+		assert.deepStrictEqual(debug.mock.calls[0]?.arguments, ["Cache request attempt 1/3 failed; retrying"]);
+	});
+}
+
+test("does not retry cache-service authorization failures", async t => {
+	const fetch = t.mock.fn(async () => Response.json({ msg: "cache read denied" }, { status: 403 }));
+	const execute = t.mock.fn(async () => {});
+	const sleep = t.mock.fn(async () => {});
 	const environment = cacheServiceEnvironment;
 
-	expect(restoreCache(["cache"], "key", [], { debug, environment, execute, fetch, sleep })).resolves
-		.toBeUndefined();
-	expect(fetch).toHaveBeenCalledTimes(2);
-	expect(sleep).toHaveBeenCalledTimes(1);
-	expect(debug).toHaveBeenCalledTimes(1);
-	expect(debug).toHaveBeenCalledWith("Cache request attempt 1/3 failed; retrying");
-});
-
-test("does not retry cache-service authorization failures", () => {
-	const fetch = mock(async () => Response.json({ msg: "cache read denied" }, { status: 403 }));
-	const execute = mock(async () => {});
-	const sleep = mock(async () => {});
-	const environment = cacheServiceEnvironment;
-
-	expect(restoreCache(["cache"], "key", [], { environment, execute, fetch, sleep })).rejects.toThrow(
-		"cache read denied",
-	);
-	expect(fetch).toHaveBeenCalledTimes(1);
-	expect(sleep).not.toHaveBeenCalled();
+	await assert.rejects(restoreCache(["cache"], "key", [], { environment, execute, fetch, sleep }), {
+		message: "cache read denied",
+	});
+	assert.strictEqual(fetch.mock.callCount(), 1);
+	assert.strictEqual(sleep.mock.callCount(), 0);
 });

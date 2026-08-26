@@ -1,10 +1,16 @@
+import type { ChildProcess } from "node:child_process";
+import { spawn } from "node:child_process";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import type { Readable } from "node:stream";
+import { text } from "node:stream/consumers";
 
 const WORKSPACE = "/workspace";
-const FIXTURE_ROOT = new URL("./fixtures/dprint/", import.meta.url);
-const DPRINT_COMMAND = ["bunx", "--silent", "dprint@0.56.1"] as const;
+const FIXTURE_ROOT = join(import.meta.dirname, "fixtures", "dprint");
+const DPRINT_COMMAND = "npx";
+const DPRINT_ARGUMENTS = ["--yes", "dprint@0.56.1"] as const;
+const CHECK_FAILURE_EXIT_CODE = 20;
 
 const inputs = {
 	"line-endings.ts": "export const lineEndings = true;\r\nexport const secondLine = true;\r\n",
@@ -49,6 +55,12 @@ interface Capture {
 	stdout: string;
 }
 
+interface Execution {
+	exitCode: number | null;
+	stderr: string;
+	stdout: string;
+}
+
 const fixtureEnvironment = (directory: string): Record<string, string | undefined> => ({
 	...process.env,
 	DPRINT_CACHE_DIR: join(directory, "cache"),
@@ -68,6 +80,32 @@ const normalize = (output: string, directory: string): string =>
 		.replace(/ in \d+ms/gu, " in <duration>")
 		.replace(/Thread count: \d+/gu, "Thread count: <count>");
 
+const streamText = (stream: Readable | null): Promise<string> => stream === null ? Promise.resolve("") : text(stream);
+
+const exitStatus = (child: ChildProcess): Promise<number | null> =>
+	new Promise((resolve, reject) => {
+		child.once("error", reject);
+		child.once("close", (code) => resolve(code));
+	});
+
+const run = async (
+	directory: string,
+	args: readonly string[],
+	stdout: "ignore" | "pipe" = "pipe",
+): Promise<Execution> => {
+	const child = spawn(DPRINT_COMMAND, [...DPRINT_ARGUMENTS, ...args], {
+		cwd: directory,
+		env: fixtureEnvironment(directory),
+		stdio: ["ignore", stdout, "pipe"],
+	});
+	const [collectedStdout, collectedStderr, exitCode] = await Promise.all([
+		streamText(child.stdout),
+		streamText(child.stderr),
+		exitStatus(child),
+	]);
+	return { exitCode, stderr: collectedStderr, stdout: collectedStdout };
+};
+
 const capture = async (
 	directory: string,
 	files: readonly string[],
@@ -77,18 +115,12 @@ const capture = async (
 	const args = ["check", "--config", configPath, "--log-level", "debug"];
 	if (listDifferent) args.push("--list-different");
 	args.push(...files);
-	const child = Bun.spawn([...DPRINT_COMMAND, ...args], {
-		cwd: directory,
-		env: fixtureEnvironment(directory),
-		stderr: "pipe",
-		stdout: "pipe",
-	});
-	const [stdout, stderr, exitCode] = await Promise.all([
-		new Response(child.stdout).text(),
-		new Response(child.stderr).text(),
-		child.exited,
-	]);
-	if (exitCode !== 20) throw new Error(`Expected dprint check to exit with 20, received ${exitCode}: ${stderr}`);
+	const { exitCode, stderr, stdout } = await run(directory, args);
+	if (exitCode !== CHECK_FAILURE_EXIT_CODE) {
+		throw new Error(
+			`Expected dprint check to exit with ${CHECK_FAILURE_EXIT_CODE}, received ${exitCode}: ${stderr}`,
+		);
+	}
 	const normalizedStdout = normalize(stdout, directory);
 	const stableStdout = !listDifferent && files.length > 1
 		? normalizedStdout.split("--\n").filter(Boolean).toSorted().map(section => `${section}--\n`).join("")
@@ -100,9 +132,9 @@ const capture = async (
 };
 
 const writeFixture = async (path: string, contents: string): Promise<void> => {
-	const url = new URL(path, FIXTURE_ROOT);
-	await mkdir(dirname(url.pathname), { recursive: true });
-	await writeFile(url, contents, "utf8");
+	const target = join(FIXTURE_ROOT, path);
+	await mkdir(dirname(target), { recursive: true });
+	await writeFile(target, contents, "utf8");
 };
 
 const directory = await mkdtemp(join(tmpdir(), "dprint-check-fixtures-"));
@@ -113,14 +145,8 @@ try {
 	await Promise.all(Object.entries(inputs).map(([name, contents]) => writeFile(join(directory, name), contents)));
 
 	for (const configPath of ["dprint.json", "dprint-debug.json"]) {
-		const prime = Bun.spawn([...DPRINT_COMMAND, "output-file-paths", "--config", configPath], {
-			cwd: directory,
-			env: fixtureEnvironment(directory),
-			stderr: "pipe",
-			stdout: "ignore",
-		});
-		const [primeError, primeExitCode] = await Promise.all([new Response(prime.stderr).text(), prime.exited]);
-		if (primeExitCode !== 0) throw new Error(`Could not prime dprint plugins: ${primeError}`);
+		const prime = await run(directory, ["output-file-paths", "--config", configPath], "ignore");
+		if (prime.exitCode !== 0) throw new Error(`Could not prime dprint plugins: ${prime.stderr}`);
 	}
 
 	const checkTypescript = await capture(directory, ["typescript.ts"]);

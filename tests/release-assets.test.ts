@@ -1,4 +1,5 @@
-import { expect, test } from "bun:test";
+import assert from "node:assert/strict";
+import { test } from "node:test";
 
 import { resolveRuntimePlatform, selectReleaseAsset } from "#lib/platform";
 import type { ReleaseAsset } from "#lib/version";
@@ -60,6 +61,6 @@ test("selects every historical dprint release ZIP", async () => {
 		}
 	}
 
-	expect(checked).toBePositive();
-	expect(failures).toBeEmpty();
+	assert.ok(checked > 0);
+	assert.deepStrictEqual(failures, []);
 });

@@ -1,7 +1,8 @@
-import { describe, expect, mock, test } from "bun:test";
+import assert from "node:assert/strict";
 import { execFile } from "node:child_process";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import { describe, test } from "node:test";
 import { promisify } from "node:util";
 
 import { DPRINT, ENVIRONMENT } from "#lib/contracts";
@@ -20,43 +21,46 @@ test("stores and finds complete tool-cache entries", async () => {
 	await writeFile(join(source, "nested", "metadata"), "metadata");
 	context.setEnvironment(ENVIRONMENT.runnerToolCache, toolCache);
 
-	expect(findTool(DPRINT.name, TEST_DPRINT_VERSION, "x64")).toBeEmpty();
+	assert.strictEqual(findTool(DPRINT.name, TEST_DPRINT_VERSION, "x64"), "");
 	const cached = await cacheToolDirectory(source, DPRINT.name, TEST_DPRINT_VERSION, "x64");
 
-	expect(cached).toBe(join(toolCache, DPRINT.name, TEST_DPRINT_VERSION, "x64"));
-	expect(findTool(DPRINT.name, TEST_DPRINT_VERSION, "x64")).toBe(cached);
-	expect(await readFile(join(cached, DPRINT.name), "utf8")).toBe("binary");
-	expect(await readFile(join(cached, "nested", "metadata"), "utf8")).toBe("metadata");
+	assert.strictEqual(cached, join(toolCache, DPRINT.name, TEST_DPRINT_VERSION, "x64"));
+	assert.strictEqual(findTool(DPRINT.name, TEST_DPRINT_VERSION, "x64"), cached);
+	assert.strictEqual(await readFile(join(cached, DPRINT.name), "utf8"), "binary");
+	assert.strictEqual(await readFile(join(cached, "nested", "metadata"), "utf8"), "metadata");
 });
 
 describe("downloadTool", () => {
-	test("retries transient responses and streams the download", async () => {
+	test("retries transient responses and streams the download", async t => {
 		const root = await context.temporaryDirectory("dprint-tool-");
 		context.setEnvironment(ENVIRONMENT.runnerTemporaryDirectory, root);
-		const fetch = mock()
-			.mockResolvedValueOnce(new Response("try later", { status: 503 }))
-			.mockResolvedValueOnce(new Response("dprint binary"));
-		const sleep = mock(async () => {});
+		const responses = [new Response("try later", { status: 503 }), new Response("dprint binary")];
+		const fetch = t.mock.fn(async (): Promise<Response> => {
+			const response = responses.shift();
+			if (response === undefined) throw new Error("Unexpected request");
+			return response;
+		});
+		const sleep = t.mock.fn(async () => {});
 
 		const downloaded = await downloadTool(`https://example.com/${TEST_DPRINT_ASSET}`, { fetch, sleep });
 
-		expect(await readFile(downloaded, "utf8")).toBe("dprint binary");
-		expect(fetch).toHaveBeenCalledTimes(2);
-		expect(sleep).toHaveBeenCalledTimes(1);
-		expect(sleep).toHaveBeenCalledWith(1000);
+		assert.strictEqual(await readFile(downloaded, "utf8"), "dprint binary");
+		assert.strictEqual(fetch.mock.callCount(), 2);
+		assert.strictEqual(sleep.mock.callCount(), 1);
+		assert.deepStrictEqual(sleep.mock.calls[0]?.arguments, [1000]);
 	});
 
-	test("does not retry a permanent response", async () => {
+	test("does not retry a permanent response", async t => {
 		const root = await context.temporaryDirectory("dprint-tool-");
 		context.setEnvironment(ENVIRONMENT.runnerTemporaryDirectory, root);
-		const fetch = mock(async () => new Response("forbidden", { status: 403 }));
-		const sleep = mock(async () => {});
+		const fetch = t.mock.fn(async () => new Response("forbidden", { status: 403 }));
+		const sleep = t.mock.fn(async () => {});
 
-		expect(downloadTool(`https://example.com/${TEST_DPRINT_ASSET}`, { fetch, sleep })).rejects.toThrow(
-			"Download failed with HTTP 403",
-		);
-		expect(fetch).toHaveBeenCalledTimes(1);
-		expect(sleep).not.toHaveBeenCalled();
+		await assert.rejects(downloadTool(`https://example.com/${TEST_DPRINT_ASSET}`, { fetch, sleep }), {
+			message: "Download failed with HTTP 403",
+		});
+		assert.strictEqual(fetch.mock.callCount(), 1);
+		assert.strictEqual(sleep.mock.callCount(), 0);
 	});
 });
 
@@ -72,5 +76,5 @@ test("extracts a downloaded ZIP archive", async () => {
 
 	const extracted = await extractZip(archive);
 
-	expect(await readFile(join(extracted, DPRINT.name), "utf8")).toBe("binary");
+	assert.strictEqual(await readFile(join(extracted, DPRINT.name), "utf8"), "binary");
 });

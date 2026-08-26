@@ -242,10 +242,14 @@ const upload = async (urlString: string, archive: string, options: CacheOptions)
 		for (let offset = 0, index = 0; offset < size; offset += UPLOAD_CHUNK_SIZE, index++) {
 			const length = Math.min(UPLOAD_CHUNK_SIZE, size - offset);
 			const buffer = Buffer.allocUnsafe(length);
-			const { bytesRead } = await file.read(buffer, 0, length, offset);
+			for (let filled = 0; filled < length;) {
+				const { bytesRead } = await file.read(buffer, filled, length - filled, offset + filled);
+				if (bytesRead === 0) throw new Error(`Cache archive ended before ${String(size)} bytes: ${archive}`);
+				filled += bytesRead;
+			}
 			const blockId = Buffer.from(index.toString().padStart(8, "0")).toString("base64");
 			blockIds.push(blockId);
-			await uploadBlock(url, blockId, buffer.subarray(0, bytesRead), options);
+			await uploadBlock(url, blockId, buffer, options);
 		}
 	} finally {
 		await file.close();

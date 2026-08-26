@@ -25,7 +25,7 @@ foreach ($path in $bundlePaths) {
 		--deny-self-hosted-runners
 }
 
-bun run build
+npm run build
 Assert-ReleaseChecksum -Root .
 foreach ($path in $releasePaths) {
 	Assert-FilesIdentical $path (Join-Path candidate $path)

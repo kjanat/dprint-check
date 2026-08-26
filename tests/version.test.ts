@@ -1,5 +1,6 @@
-import { describe, expect, test } from "bun:test";
+import assert from "node:assert/strict";
 import type { OutgoingHttpHeaders } from "node:http";
+import { describe, test } from "node:test";
 
 import { DPRINT } from "#lib/contracts";
 import { GITHUB_API, githubApiHeaders } from "#lib/github";
@@ -23,28 +24,34 @@ const successfulClient = () => {
 	return { client: { getJson }, requests };
 };
 
-test.each([
+const normalizationCases = [
 	{ label: "explicit version", input: ` ${TEST_DPRINT_VERSION} `, expected: TEST_DPRINT_VERSION },
 	{ label: "latest", input: DPRINT.latestVersion, expected: undefined },
 	{ label: "case-insensitive latest", input: " LATEST ", expected: undefined },
 	{ label: "empty input", input: "", expected: undefined },
-])("normalizes $label", ({ input, expected }) => {
-	expect(specifiedVersion(input)).toBe(expected);
-});
+];
+
+for (const { label, input, expected } of normalizationCases) {
+	test(`normalizes ${label}`, () => {
+		assert.strictEqual(specifiedVersion(input), expected);
+	});
+}
 
 describe("resolveRelease", () => {
-	test("reports a missing requested release explicitly", () => {
+	test("reports a missing requested release explicitly", async () => {
 		const http = {
-			getJson: async <T>() => ({ statusCode: 404, result: null as T | null }),
+			getJson: async () => ({ statusCode: 404, result: null }),
 		};
-		expect(resolveRelease("99.0.0", "", http)).rejects.toThrow("dprint release 99.0.0 was not found");
+		await assert.rejects(resolveRelease("99.0.0", "", http), {
+			message: "dprint release 99.0.0 was not found",
+		});
 	});
 
 	test("authenticates release metadata requests", async () => {
 		const { client, requests } = successfulClient();
 
-		expect(await resolveRelease(TEST_DPRINT_VERSION, "test-token", client)).toEqual(release);
-		expect(requests).toEqual([{
+		assert.deepStrictEqual(await resolveRelease(TEST_DPRINT_VERSION, "test-token", client), release);
+		assert.deepStrictEqual(requests, [{
 			url: `${GITHUB_API.dprintReleasesUrl}/tags/${TEST_DPRINT_VERSION}`,
 			headers: githubApiHeaders("test-token"),
 		}]);
@@ -53,19 +60,19 @@ describe("resolveRelease", () => {
 	test("requests the latest release without an authorization header", async () => {
 		const { client, requests } = successfulClient();
 
-		expect(await resolveRelease(DPRINT.latestVersion, "", client)).toEqual(release);
-		expect(requests).toEqual([{
+		assert.deepStrictEqual(await resolveRelease(DPRINT.latestVersion, "", client), release);
+		assert.deepStrictEqual(requests, [{
 			url: `${GITHUB_API.dprintReleasesUrl}/${DPRINT.latestVersion}`,
 			headers: githubApiHeaders(),
 		}]);
 	});
 
-	test("rejects malformed release metadata", () => {
+	test("rejects malformed release metadata", async () => {
 		const http = {
 			getJson: async <T>() => ({ statusCode: 200, result: { tag_name: TEST_DPRINT_VERSION, assets: [{}] } as T }),
 		};
-		expect(resolveRelease(DPRINT.latestVersion, "", http)).rejects.toThrow(
-			"Failed to resolve dprint release latest (HTTP 200)",
-		);
+		await assert.rejects(resolveRelease(DPRINT.latestVersion, "", http), {
+			message: "Failed to resolve dprint release latest (HTTP 200)",
+		});
 	});
 });

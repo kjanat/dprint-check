@@ -61,8 +61,8 @@ foreach ($path in $bundlePaths) {
 
 Push-Location source
 try {
-	bun install --frozen-lockfile
-	bun run build
+	npm ci
+	npm run build
 }
 finally {
 	Pop-Location

@@ -1,9 +1,9 @@
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
+import { afterEach } from "node:test";
 
 import { createTemporaryDirectory } from "#lib/temp";
 import type { ReleaseAsset } from "#lib/version";
-import { afterEach } from "bun:test";
 
 export const TEST_DPRINT_VERSION = "0.56.1";
 export const TEST_DPRINT_ASSET = "dprint.zip";

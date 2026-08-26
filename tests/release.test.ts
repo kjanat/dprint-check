@@ -1,9 +1,10 @@
-import { describe, expect, test } from "bun:test";
+import assert from "node:assert/strict";
 import { dirname, join } from "node:path";
+import { describe, test } from "node:test";
 
 import { execFileAsync } from "#lib/exec";
 
-const root = dirname(import.meta.dir);
+const root = dirname(import.meta.dirname);
 const commonScript = join(root, ".github", "scripts", "Release.Common.ps1");
 const invokePowerShell = async (script: string) =>
 	(
@@ -13,6 +14,23 @@ const invokePowerShell = async (script: string) =>
 			{ cwd: root },
 		)
 	).stdout.trimEnd();
+
+const invokeFailingPowerShell = (script: string): Promise<unknown> =>
+	invokePowerShell(script).then(() => undefined, (error: unknown) => error);
+
+function assertPowerShellFailure(value: unknown): asserts value is Error & { stdout: string } {
+	assert.ok(value instanceof Error);
+	assert.ok("stdout" in value);
+	assert.ok(typeof value.stdout === "string");
+}
+
+const parseJson = (output: string): unknown => JSON.parse(output);
+
+const parseJsonString = (output: string): string => {
+	const value = parseJson(output);
+	if (typeof value !== "string") throw new TypeError(`Expected a JSON string, received ${typeof value}`);
+	return value;
+};
 
 describe("release PowerShell", () => {
 	test("all release scripts parse", async () => {
@@ -30,7 +48,7 @@ Get-ChildItem '.github/scripts/*.ps1' | ForEach-Object {
 if ($failed) { exit 1 }
 'valid'
 `);
-		expect(output).toBe("valid");
+		assert.strictEqual(output, "valid");
 	});
 
 	test("annotates release errors before throwing", async () => {
@@ -39,18 +57,15 @@ if ($failed) { exit 1 }
 try { Write-ReleaseError "bad%line\`nnext" } catch {}
 exit 0
 `);
-		expect(annotation).toBe("::error::bad%25line%0Anext");
-		const failure = await invokePowerShell(`
+		assert.strictEqual(annotation, "::error::bad%25line%0Anext");
+		const failure = await invokeFailingPowerShell(`
 . '${commonScript}'
 trap { Write-UnhandledReleaseError $_; break }
 Write-ReleaseError 'release failed'
-`).then(
-			() => undefined,
-			error => error as Error & { stdout: string },
-		);
-		expect(failure).toBeInstanceOf(Error);
-		expect(failure?.message).toContain("release failed");
-		expect(failure?.stdout.trimEnd()).toBe("::error::release failed");
+`);
+		assertPowerShellFailure(failure);
+		assert.ok(failure.message.includes("release failed"));
+		assert.strictEqual(failure.stdout.trimEnd(), "::error::release failed");
 	});
 
 	test("consumes expected native probe failures", async () => {
@@ -62,7 +77,7 @@ $PSNativeCommandUseErrorActionPreference = $true
 $succeeded = Test-NativeCommand { pwsh -NoProfile -NonInteractive -Command 'exit 7' }
 "$succeeded|$LASTEXITCODE"
 `);
-		expect(output).toBe("False|0");
+		assert.strictEqual(output, "False|0");
 	});
 
 	test("reads exactly one git trailer as a string", async () => {
@@ -79,7 +94,7 @@ finally {
 	Remove-Item -Recurse -Force $fixture
 }
 `);
-		expect(JSON.parse(output)).toEqual({
+		assert.deepStrictEqual(parseJson(output), {
 			type: "System.String",
 			value: "https://github.com/dprint/check/attestations/12345678",
 		});
@@ -107,7 +122,7 @@ finally {
 	Remove-Item -Recurse -Force $fixture
 }
 `);
-		expect(JSON.parse(output)).toEqual({
+		assert.deepStrictEqual(parseJson(output), {
 			assets: ["SHA256SUMS", "dist/action.mjs"],
 			package: [
 				"action.yml",
@@ -126,30 +141,42 @@ finally {
 $readme = Format-ReleaseReadme -RepositoryUrl 'https://github.com/dprint/check' -Version 'v3.0.0' -SourceSha '1111111111111111111111111111111111111111' -AttestationUrl 'https://github.com/dprint/check/attestations/12345678' -ReleasePath @('SHA256SUMS', 'dist/main.mjs', 'dist/post.mjs') -LicensePath @('LICENSE')
 $readme | ConvertTo-Json -Compress
 `);
-		const readme = JSON.parse(output) as string;
-		expect(readme).toContain("# dprint/check v3.0.0");
-		expect(readme).toContain("- uses: dprint/check@v3.0.0");
-		expect(readme).toContain(
-			"[`1111111`](https://github.com/dprint/check/commit/1111111111111111111111111111111111111111)",
+		const readme = parseJsonString(output);
+		assert.ok(readme.includes("# dprint/check v3.0.0"));
+		assert.ok(readme.includes("- uses: dprint/check@v3.0.0"));
+		assert.ok(
+			readme.includes(
+				"[`1111111`](https://github.com/dprint/check/commit/1111111111111111111111111111111111111111)",
+			),
 		);
-		expect(readme).toContain(
-			"[view on GitHub](https://github.com/dprint/check/attestations/12345678)",
+		assert.ok(
+			readme.includes(
+				"[view on GitHub](https://github.com/dprint/check/attestations/12345678)",
+			),
 		);
-		expect(readme).toContain(
-			"[`LICENSE`](https://github.com/dprint/check/blob/v3.0.0/LICENSE)",
+		assert.ok(
+			readme.includes(
+				"[`LICENSE`](https://github.com/dprint/check/blob/v3.0.0/LICENSE)",
+			),
 		);
-		expect(readme).toContain("release_dir=\"$(mktemp -d)\"");
-		expect(readme).toContain(
-			"test \"$(gh release view v3.0.0 -R dprint/check --json isDraft --jq .isDraft)\" = false",
+		assert.ok(readme.includes("release_dir=\"$(mktemp -d)\""));
+		assert.ok(
+			readme.includes(
+				"test \"$(gh release view v3.0.0 -R dprint/check --json isDraft --jq .isDraft)\" = false",
+			),
 		);
-		expect(readme).toContain(
-			"gh release download v3.0.0 -R dprint/check --pattern main.mjs --dir \"$release_dir/dist\"",
+		assert.ok(
+			readme.includes(
+				"gh release download v3.0.0 -R dprint/check --pattern main.mjs --dir \"$release_dir/dist\"",
+			),
 		);
-		expect(readme).toContain("(cd \"$release_dir\" && sha256sum --check SHA256SUMS)");
-		expect(readme).toContain(
-			"gh attestation verify \"$release_dir/dist/main.mjs\" --repo dprint/check --source-digest 1111111111111111111111111111111111111111",
+		assert.ok(readme.includes("(cd \"$release_dir\" && sha256sum --check SHA256SUMS)"));
+		assert.ok(
+			readme.includes(
+				"gh attestation verify \"$release_dir/dist/main.mjs\" --repo dprint/check --source-digest 1111111111111111111111111111111111111111",
+			),
 		);
-		expect(readme).not.toContain("gh release verify ");
+		assert.ok(!readme.includes("gh release verify "));
 	});
 
 	test("builds exact-version release and tag badge URLs", async () => {
@@ -160,7 +187,7 @@ $readme | ConvertTo-Json -Compress
 	tag = Get-TagBadgeUrl -Repository 'dprint/check' -Version 'v3.0.0'
 } | ConvertTo-Json -Compress
 `);
-		expect(JSON.parse(output)).toEqual({
+		assert.deepStrictEqual(parseJson(output), {
 			release:
 				"https://img.shields.io/github/v/release/dprint/check?include_prereleases&sort=semver&filter=v3.0.0&display_name=release&style=flat-square",
 			tag:
@@ -178,25 +205,35 @@ $commits = @([pscustomobject]@{
 $notes = Format-ReleaseNote -Commits $commits -RepositoryUrl 'https://github.com/dprint/check' -Version 'v3.0.0' -SourceSha '1111111111111111111111111111111111111111' -ReleaseSha '2222222222222222222222222222222222222222' -AttestationUrl 'https://github.com/dprint/check/attestations/12345678' -ReleasePath @('SHA256SUMS', 'dist/action.mjs')
 $notes | ConvertTo-Json -Compress
 `);
-		const notes = JSON.parse(output) as string;
-		expect(notes).toContain("## Provenance and verification");
-		expect(notes).toContain(
-			"[GitHub artifact attestation](https://github.com/dprint/check/attestations/12345678)",
+		const notes = parseJsonString(output);
+		assert.ok(notes.includes("## Provenance and verification"));
+		assert.ok(
+			notes.includes(
+				"[GitHub artifact attestation](https://github.com/dprint/check/attestations/12345678)",
+			),
 		);
-		expect(notes).toContain(
-			"[`SHA256SUMS`](https://github.com/dprint/check/releases/download/v3.0.0/SHA256SUMS)",
+		assert.ok(
+			notes.includes(
+				"[`SHA256SUMS`](https://github.com/dprint/check/releases/download/v3.0.0/SHA256SUMS)",
+			),
 		);
-		expect(notes).toContain("release_dir=\"$(mktemp -d)\"");
-		expect(notes).toContain(
-			"gh release download v3.0.0 -R dprint/check --pattern action.mjs --dir \"$release_dir/dist\"",
+		assert.ok(notes.includes("release_dir=\"$(mktemp -d)\""));
+		assert.ok(
+			notes.includes(
+				"gh release download v3.0.0 -R dprint/check --pattern action.mjs --dir \"$release_dir/dist\"",
+			),
 		);
-		expect(notes).toContain(
-			"gh attestation verify \"$release_dir/dist/action.mjs\" --repo dprint/check --source-digest 1111111111111111111111111111111111111111",
+		assert.ok(
+			notes.includes(
+				"gh attestation verify \"$release_dir/dist/action.mjs\" --repo dprint/check --source-digest 1111111111111111111111111111111111111111",
+			),
 		);
-		expect(notes).not.toContain("gh release verify ");
-		expect(notes).toContain("## Source changes");
-		expect(notes).toContain(
-			"[`3333333`](https://github.com/dprint/check/commit/3333333333333333333333333333333333333333): Strengthen CI and release verification",
+		assert.ok(!notes.includes("gh release verify "));
+		assert.ok(notes.includes("## Source changes"));
+		assert.ok(
+			notes.includes(
+				"[`3333333`](https://github.com/dprint/check/commit/3333333333333333333333333333333333333333): Strengthen CI and release verification",
+			),
 		);
 	});
 
@@ -206,9 +243,9 @@ $notes | ConvertTo-Json -Compress
 $notes = Format-ReleaseNote -Commits @() -RepositoryUrl 'https://github.com/dprint/check' -Version 'v3.0.0' -SourceSha '1111111111111111111111111111111111111111' -ReleaseSha '2222222222222222222222222222222222222222' -AttestationUrl 'https://github.com/dprint/check/attestations/12345678' -ReleasePath @('SHA256SUMS', 'dist/action.mjs')
 $notes | ConvertTo-Json -Compress
 `);
-		const notes = JSON.parse(output) as string;
-		expect(notes).toContain("## Provenance and verification");
-		expect(notes).not.toContain("## Source changes");
+		const notes = parseJsonString(output);
+		assert.ok(notes.includes("## Provenance and verification"));
+		assert.ok(!notes.includes("## Source changes"));
 	});
 
 	test("selects previous and floating releases by semantic version", async () => {
@@ -221,7 +258,7 @@ $tags = @('v3.0.2', 'v3.1.0', 'v3.0.3')
 	major = Get-LatestStableReleaseVersion -Tags $tags -Prefix 'v3'
 } | ConvertTo-Json -Compress
 `);
-		expect(JSON.parse(output)).toEqual({ previous: "v3.1.0", minor: "v3.0.3", major: "v3.1.0" });
+		assert.deepStrictEqual(parseJson(output), { previous: "v3.1.0", minor: "v3.0.3", major: "v3.1.0" });
 	});
 
 	test("returns no release outside an empty semantic version range", async () => {
@@ -234,11 +271,11 @@ $ErrorActionPreference = 'Stop'
 	latest = Get-LatestStableReleaseVersion -Tags @('v2.9.9') -Prefix 'v3'
 } | ConvertTo-Json -Compress
 `);
-		expect(JSON.parse(output)).toEqual({ previous: null, latest: null });
+		assert.deepStrictEqual(parseJson(output), { previous: null, latest: null });
 	});
 
 	test("treats draft releases as existing versions", async () => {
-		const failure = await invokePowerShell(`
+		const failure = await invokeFailingPowerShell(`
 . '${commonScript}'
 function Get-ReleaseHistory {
 	return @([pscustomobject]@{
@@ -248,13 +285,10 @@ function Get-ReleaseHistory {
 	})
 }
 Assert-ReleaseDoesNotExist 'v3.0.1'
-`).then(
-			() => undefined,
-			error => error as Error & { stdout: string },
-		);
-		expect(failure).toBeInstanceOf(Error);
-		expect(failure?.message).toContain("Release v3.0.1 already exists");
-		expect(failure?.stdout).toContain("untagged-draft");
+`);
+		assertPowerShellFailure(failure);
+		assert.ok(failure.message.includes("Release v3.0.1 already exists"));
+		assert.ok(failure.stdout.includes("untagged-draft"));
 	});
 
 	test("waits for a newly created draft to appear in release history", async () => {
@@ -273,7 +307,7 @@ function Get-ReleaseHistory {
 $release = Wait-ReleaseByUrl 'https://github.com/dprint/check/releases/tag/untagged-draft' -Attempts 3 -DelaySeconds 0
 @{ queries = $script:queries; url = $release.html_url } | ConvertTo-Json -Compress
 `);
-		expect(JSON.parse(output)).toEqual({
+		assert.deepStrictEqual(parseJson(output), {
 			queries: 3,
 			url: "https://github.com/dprint/check/releases/tag/untagged-draft",
 		});

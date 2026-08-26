@@ -76,7 +76,7 @@ const restorePluginCache = async (
 		await rm(join(cacheDir, DPRINT.remoteCacheDirectory), { recursive: true, force: true });
 		debug("Cleared restored remote files before plugin warmup");
 	}
-	if (await warmupPlugins(binaryPath, config.roots, { debug: debugEnabled })) {
+	if (await warmupPlugins(binaryPath, configRoots, { debug: debugEnabled })) {
 		saveState(ACTION_STATE.pluginCacheReady, ACTION_VALUE.true);
 	}
 };
@@ -135,7 +135,7 @@ const run = async (): Promise<void> => {
 				preparedConfig?.roots ?? [],
 				debugEnabled,
 			);
-		} else if (cacheEnabled) warning("GitHub Actions cache is unavailable; skipping plugin cache");
+		} else if (cacheEnabled) info("GitHub Actions cache is unavailable; skipping plugin cache");
 
 		if (!installOnly) {
 			debug("Running dprint check");

@@ -1,6 +1,9 @@
-import { describe, expect, mock, test } from "bun:test";
+import assert from "node:assert/strict";
+import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
+import { describe, test } from "node:test";
+import type { TestContext } from "node:test";
 
 import {
 	computeCacheKey,
@@ -20,23 +23,37 @@ const workspace = async (): Promise<string> => {
 	return path;
 };
 
-const fetchConfigs = (configs: Readonly<Record<string, string>>) =>
-	mock(async (input: string | URL): Promise<Response> => {
+const fetchConfigs = (t: TestContext, configs: Readonly<Record<string, string>>) =>
+	t.mock.fn(async (input: string | URL): Promise<Response> => {
 		const url = String(input);
 		const content = configs[url];
 		return content === undefined ? new Response("not found", { status: 404 }) : new Response(content);
 	});
 
+const includesMessage = (message: string) => (error: unknown): boolean => String(error).includes(message);
+
+const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
+	typeof value === "object" && value !== null && !Array.isArray(value);
+
+const readJsonObject = async (path: string): Promise<Readonly<Record<string, unknown>>> => {
+	const value: unknown = JSON.parse(await readFile(path, "utf8"));
+	if (!isRecord(value)) throw new Error(`Expected an object in ${path}`);
+	return value;
+};
+
 test("parses config locators separated by lines, tabs, or pipes", () => {
-	expect(parseConfigPaths([
-		"https://example.com/configs/first.json",
-		"https://example.com/configs/with,comma;semicolon.json | configs/*.json\tconfig/local.json",
-	].join("\n"))).toEqual([
-		"https://example.com/configs/first.json",
-		"https://example.com/configs/with,comma;semicolon.json",
-		"configs/*.json",
-		"config/local.json",
-	]);
+	assert.deepStrictEqual(
+		parseConfigPaths([
+			"https://example.com/configs/first.json",
+			"https://example.com/configs/with,comma;semicolon.json | configs/*.json\tconfig/local.json",
+		].join("\n")),
+		[
+			"https://example.com/configs/first.json",
+			"https://example.com/configs/with,comma;semicolon.json",
+			"configs/*.json",
+			"config/local.json",
+		],
+	);
 });
 
 describe("findConfigFiles", () => {
@@ -49,7 +66,7 @@ describe("findConfigFiles", () => {
 		await writeFile(rootConfig, "{}");
 		await writeFile(nestedConfig, "{}");
 
-		expect(await findConfigFiles()).toEqual([rootConfig, nestedConfig]);
+		assert.deepStrictEqual(await findConfigFiles(), [rootConfig, nestedConfig]);
 	});
 
 	test("uses the same root config precedence as dprint", async () => {
@@ -58,7 +75,7 @@ describe("findConfigFiles", () => {
 			await writeFile(join(root, name), "{}");
 		}
 
-		expect((await findConfigFiles())[0]).toBe(join(root, "dprint.json"));
+		assert.strictEqual((await findConfigFiles())[0], join(root, "dprint.json"));
 	});
 
 	test("resolves a custom config path from the workspace", async () => {
@@ -66,7 +83,7 @@ describe("findConfigFiles", () => {
 		const config = join(root, "config", "ci.json");
 		await mkdir(join(root, "config"), { recursive: true });
 		await writeFile(config, "{}");
-		expect(await findConfigFiles("config/ci.json")).toEqual([config]);
+		assert.deepStrictEqual(await findConfigFiles("config/ci.json"), [config]);
 	});
 
 	test("expands a config-path glob from the workspace", async () => {
@@ -75,14 +92,14 @@ describe("findConfigFiles", () => {
 		await mkdir(join(root, "configs"), { recursive: true });
 		await Promise.all(configs.map(config => writeFile(config, "{}")));
 
-		expect(await findConfigFiles("configs/*.json")).toEqual(configs);
+		assert.deepStrictEqual(await findConfigFiles("configs/*.json"), configs);
 	});
 
 	test("accepts a remote config URL", async () => {
 		await workspace();
 		const url = "https://example.com/configs/dprint.json";
 
-		expect(await findConfigFiles(url)).toEqual([url]);
+		assert.deepStrictEqual(await findConfigFiles(url), [url]);
 	});
 
 	test("expands multiple local and remote config locators", async () => {
@@ -92,12 +109,12 @@ describe("findConfigFiles", () => {
 		await mkdir(join(root, "configs"), { recursive: true });
 		await Promise.all(localConfigs.map(config => writeFile(config, "{}")));
 
-		expect(await findConfigFiles(`configs/*.json|${remoteConfig}`)).toEqual([...localConfigs, remoteConfig]);
+		assert.deepStrictEqual(await findConfigFiles(`configs/*.json|${remoteConfig}`), [...localConfigs, remoteConfig]);
 	});
 });
 
 describe("resolveConfigGraph", () => {
-	test("resolves local and remote extends recursively", async () => {
+	test("resolves local and remote extends recursively", async t => {
 		const root = await workspace();
 		const rootConfig = join(root, "dprint.jsonc");
 		const localConfig = join(root, "base.json");
@@ -115,43 +132,44 @@ describe("resolveConfigGraph", () => {
 			}`,
 		);
 		await writeFile(localConfig, "{}");
-		const fetch = fetchConfigs({
+		const fetch = fetchConfigs(t, {
 			[remoteConfig]: `{ "extends": "./base.json" }`,
 			[remoteBase]: "{}",
 		});
 
 		const graph = await resolveConfigGraph([rootConfig], { fetch });
 
-		expect(graph.roots).toEqual([rootConfig]);
-		expect(graph.hasRemote).toBeTrue();
-		expect(graph.sources.map(source => source.source).sort()).toEqual(
+		assert.deepStrictEqual(graph.roots, [rootConfig]);
+		assert.strictEqual(graph.hasRemote, true);
+		assert.deepStrictEqual(
+			graph.sources.map(source => source.source).sort(),
 			[rootConfig, localConfig, remoteConfig, remoteBase].sort(),
 		);
-		expect(fetch).toHaveBeenCalledTimes(2);
+		assert.strictEqual(fetch.mock.callCount(), 2);
 	});
 
-	test("supports a remote root with relative remote extends", async () => {
+	test("supports a remote root with relative remote extends", async t => {
 		await workspace();
 		const rootConfig = "https://example.com/team/dprint.json";
 		const baseConfig = "https://example.com/shared/base.jsonc";
-		const fetch = fetchConfigs({
+		const fetch = fetchConfigs(t, {
 			[rootConfig]: `{ "extends": "/shared/base.jsonc" }`,
 			[baseConfig]: "{}",
 		});
 
 		const graph = await resolveConfigGraph([rootConfig], { fetch });
 
-		expect(graph.roots).toEqual([rootConfig]);
-		expect(graph.sources.map(source => source.source)).toEqual([rootConfig, baseConfig]);
-		expect(graph.sources.every(source => source.remote)).toBeTrue();
+		assert.deepStrictEqual(graph.roots, [rootConfig]);
+		assert.deepStrictEqual(graph.sources.map(source => source.source), [rootConfig, baseConfig]);
+		assert.strictEqual(graph.sources.every(source => source.remote), true);
 	});
 
-	test("follows redirects and resolves relative extends from the final URL", async () => {
+	test("follows redirects and resolves relative extends from the final URL", async t => {
 		await workspace();
 		const requested = "https://example.com/latest.json";
 		const redirected = "https://cdn.example.com/configs/dprint.json";
 		const base = "https://cdn.example.com/configs/base.json";
-		const fetch = mock(async (input: string | URL): Promise<Response> => {
+		const fetch = t.mock.fn(async (input: string | URL): Promise<Response> => {
 			switch (String(input)) {
 				case requested:
 					return new Response(null, { status: 302, headers: { location: redirected } });
@@ -166,9 +184,9 @@ describe("resolveConfigGraph", () => {
 
 		const graph = await resolveConfigGraph([requested], { fetch });
 
-		expect(graph.roots).toEqual([requested]);
-		expect(graph.sources.map(source => source.source)).toEqual([redirected, base]);
-		expect(fetch).toHaveBeenCalledTimes(3);
+		assert.deepStrictEqual(graph.roots, [requested]);
+		assert.deepStrictEqual(graph.sources.map(source => source.source), [redirected, base]);
+		assert.strictEqual(fetch.mock.callCount(), 3);
 	});
 
 	test("expands local configDir and originConfigDir references", async () => {
@@ -188,7 +206,8 @@ describe("resolveConfigGraph", () => {
 
 		const graph = await resolveConfigGraph([rootConfig]);
 
-		expect(graph.sources.map(source => source.source).sort()).toEqual(
+		assert.deepStrictEqual(
+			graph.sources.map(source => source.source).sort(),
 			[rootConfig, nestedConfig, siblingConfig, sharedConfig].sort(),
 		);
 	});
@@ -200,48 +219,53 @@ describe("resolveConfigGraph", () => {
 		await writeFile(first, `{ "extends": "./second.json" }`);
 		await writeFile(second, `{ "extends": "./first.json" }`);
 
-		expect(resolveConfigGraph([first])).rejects.toThrow("Circular dprint config extends detected");
+		await assert.rejects(resolveConfigGraph([first]), includesMessage("Circular dprint config extends detected"));
 	});
 
-	test.each(
-		[
-			["malformed JSONC", "{", "Failed parsing dprint config"],
-			["an unterminated block comment", "{/*", "unterminated block comment"],
-			["a non-object config", "[]", "expected an object"],
-			["a non-string extends entry", `{ "extends": [1] }`, "expected a string or an array of strings"],
-			["an unknown template", `{ "extends": "\${branch}/base.json" }`, "Unknown template literal ${branch}"],
-		] as const,
-	)("rejects %s", async (_name, content, message) => {
-		const root = await workspace();
-		const config = join(root, "dprint.json");
-		await writeFile(config, content);
+	const rejections = [
+		["malformed JSONC", "{", "Failed parsing dprint config"],
+		["an unterminated block comment", "{/*", "unterminated block comment"],
+		["a non-object config", "[]", "expected an object"],
+		["a non-string extends entry", `{ "extends": [1] }`, "expected a string or an array of strings"],
+		["an unknown template", `{ "extends": "\${branch}/base.json" }`, "Unknown template literal ${branch}"],
+	] as const;
 
-		expect(resolveConfigGraph([config])).rejects.toThrow(message);
-	});
+	for (const [name, content, message] of rejections) {
+		test(`rejects ${name}`, async () => {
+			const root = await workspace();
+			const config = join(root, "dprint.json");
+			await writeFile(config, content);
 
-	test("rejects configDir in a remote config", async () => {
+			await assert.rejects(resolveConfigGraph([config]), includesMessage(message));
+		});
+	}
+
+	test("rejects configDir in a remote config", async t => {
 		await workspace();
 		const remote = "https://example.com/dprint.json";
-		const fetch = fetchConfigs({ [remote]: `{ "extends": "\${configDir}/base.json" }` });
+		const fetch = fetchConfigs(t, { [remote]: `{ "extends": "\${configDir}/base.json" }` });
 
-		expect(resolveConfigGraph([remote], { fetch })).rejects.toThrow("Cannot use ${configDir} in remote dprint config");
+		await assert.rejects(
+			resolveConfigGraph([remote], { fetch }),
+			includesMessage("Cannot use ${configDir} in remote dprint config"),
+		);
 	});
 
-	test("reports a failed remote download", async () => {
+	test("reports a failed remote download", async t => {
 		await workspace();
 		const remote = "https://example.com/missing.json";
 
-		expect(resolveConfigGraph([remote], { fetch: fetchConfigs({}) })).rejects.toThrow(
-			`Failed downloading dprint config ${remote}: HTTP 404`,
-		);
+		await assert.rejects(resolveConfigGraph([remote], { fetch: fetchConfigs(t, {}) }), {
+			message: `Failed downloading dprint config ${remote}: HTTP 404`,
+		});
 	});
 
 	test("rejects unsupported config URL protocols", async () => {
 		await workspace();
 
-		expect(resolveConfigGraph(["ftp://example.com/dprint.json"])).rejects.toThrow(
-			"Unsupported config URL protocol: ftp:",
-		);
+		await assert.rejects(resolveConfigGraph(["ftp://example.com/dprint.json"]), {
+			message: "Unsupported config URL protocol: ftp:",
+		});
 	});
 });
 
@@ -253,33 +277,36 @@ describe("computeCacheKey", () => {
 		const firstGraph = await resolveConfigGraph([config]);
 		const first = computeCacheKey(firstGraph, TEST_DPRINT_VERSION, TEST_GNU_PLATFORM);
 		const repeated = computeCacheKey(firstGraph, TEST_DPRINT_VERSION, TEST_GNU_PLATFORM);
-		expect(repeated).toEqual(first);
+		assert.deepStrictEqual(repeated, first);
 
 		await writeFile(config, `{"plugins":["json"]}`);
 		const changedGraph = await resolveConfigGraph([config]);
-		expect(computeCacheKey(changedGraph, TEST_DPRINT_VERSION, TEST_GNU_PLATFORM).primaryKey).not.toBe(
+		assert.notStrictEqual(
+			computeCacheKey(changedGraph, TEST_DPRINT_VERSION, TEST_GNU_PLATFORM).primaryKey,
 			first.primaryKey,
 		);
 	});
 
-	test("changes with inherited remote config contents", async () => {
+	test("changes with inherited remote config contents", async t => {
 		const root = await workspace();
 		const config = join(root, "dprint.json");
 		const remote = "https://example.com/base.json";
 		await writeFile(config, `{ "extends": "${remote}" }`);
-		const firstGraph = await resolveConfigGraph([config], { fetch: fetchConfigs({ [remote]: `{"lineWidth":80}` }) });
+		const firstGraph = await resolveConfigGraph([config], {
+			fetch: fetchConfigs(t, { [remote]: `{"lineWidth":80}` }),
+		});
 		const changedGraph = await resolveConfigGraph([config], {
-			fetch: fetchConfigs({ [remote]: `{"lineWidth":120}` }),
+			fetch: fetchConfigs(t, { [remote]: `{"lineWidth":120}` }),
 		});
 
-		expect(computeCacheKey(changedGraph, TEST_DPRINT_VERSION, TEST_GNU_PLATFORM).primaryKey).not.toBe(
+		assert.notStrictEqual(
+			computeCacheKey(changedGraph, TEST_DPRINT_VERSION, TEST_GNU_PLATFORM).primaryKey,
 			computeCacheKey(firstGraph, TEST_DPRINT_VERSION, TEST_GNU_PLATFORM).primaryKey,
 		);
 	});
 
-	test.each([TEST_GNU_PLATFORM, "x86_64-unknown-linux-musl"] as const)(
-		"scopes restore keys to %s",
-		async platformKey => {
+	for (const platformKey of [TEST_GNU_PLATFORM, "x86_64-unknown-linux-musl"] as const) {
+		test(`scopes restore keys to ${platformKey}`, async () => {
 			const root = await workspace();
 			const config = join(root, "dprint.json");
 			await writeFile(config, "{}");
@@ -287,10 +314,10 @@ describe("computeCacheKey", () => {
 
 			const result = computeCacheKey(graph, TEST_DPRINT_VERSION, platformKey);
 			const platformPrefix = `${DPRINT.name}-plugins-v${DPRINT.pluginCacheVersion}-${platformKey}`;
-			expect(result.primaryKey).toStartWith(`${platformPrefix}-${TEST_DPRINT_VERSION}-`);
-			expect(result.restoreKeys).toEqual([`${platformPrefix}-${TEST_DPRINT_VERSION}-`, `${platformPrefix}-`]);
-		},
-	);
+			assert.ok(result.primaryKey.startsWith(`${platformPrefix}-${TEST_DPRINT_VERSION}-`));
+			assert.deepStrictEqual(result.restoreKeys, [`${platformPrefix}-${TEST_DPRINT_VERSION}-`, `${platformPrefix}-`]);
+		});
+	}
 
 	test("is independent of config discovery order", async () => {
 		const root = await workspace();
@@ -299,19 +326,20 @@ describe("computeCacheKey", () => {
 		const forwards = await resolveConfigGraph(configs);
 		const backwards = await resolveConfigGraph(configs.toReversed());
 
-		expect(computeCacheKey(forwards, TEST_DPRINT_VERSION, TEST_GNU_PLATFORM)).toEqual(
+		assert.deepStrictEqual(
+			computeCacheKey(forwards, TEST_DPRINT_VERSION, TEST_GNU_PLATFORM),
 			computeCacheKey(backwards, TEST_DPRINT_VERSION, TEST_GNU_PLATFORM),
 		);
 	});
 });
 
-test("materializes and cleans a remote process-plugin graph in the workspace", async () => {
+test("materializes and cleans a remote process-plugin graph in the workspace", async t => {
 	const root = await workspace();
 	const rootConfig = "https://example.com/configs/dprint.json";
 	const processConfig = "https://example.com/configs/process.json";
 	const processPlugin = `https://plugins.dprint.dev/exec-0.7.3.json@${"a".repeat(64)}`;
 	const graph = await resolveConfigGraph([rootConfig], {
-		fetch: fetchConfigs({
+		fetch: fetchConfigs(t, {
 			[rootConfig]: `{ "extends": "./process.json" }`,
 			[processConfig]: `{ "exec": { "cwd": "\${configDir}" }, "plugins": ["${processPlugin}"] }`,
 		}),
@@ -320,24 +348,48 @@ test("materializes and cleans a remote process-plugin graph in the workspace", a
 	const prepared = await prepareConfigRoots(graph);
 	const generatedPaths: string[] = [];
 	try {
-		expect(prepared.materialized).toBeTrue();
-		expect(prepared.roots).toHaveLength(1);
+		assert.strictEqual(prepared.materialized, true);
+		assert.strictEqual(prepared.roots.length, 1);
 		const preparedRoot = prepared.roots[0];
-		expect(preparedRoot).toBeString();
 		if (preparedRoot === undefined) throw new Error("Missing prepared config root");
 		generatedPaths.push(preparedRoot);
-		expect(dirname(preparedRoot)).toBe(root);
-		const rootContents = JSON.parse(await readFile(preparedRoot, "utf8")) as { extends: string };
-		generatedPaths.push(rootContents.extends);
-		expect(dirname(rootContents.extends)).toBe(root);
-		const processContents = JSON.parse(await readFile(rootContents.extends, "utf8")) as {
-			exec: { cwd: string };
-			plugins: string[];
-		};
-		expect(processContents.exec.cwd).toBe("${configDir}");
-		expect(processContents.plugins).toEqual([processPlugin]);
+		assert.strictEqual(dirname(preparedRoot), root);
+		const rootContents = await readJsonObject(preparedRoot);
+		const rootExtends = rootContents["extends"];
+		if (typeof rootExtends !== "string") throw new Error("Missing extends in the prepared config root");
+		generatedPaths.push(rootExtends);
+		assert.strictEqual(dirname(rootExtends), root);
+		assert.deepStrictEqual(rootContents["excludes"], ["**/.dprint-check-*.json"]);
+		const processContents = await readJsonObject(rootExtends);
+		const exec = processContents["exec"];
+		if (!isRecord(exec)) throw new Error("Missing exec in the prepared process config");
+		assert.strictEqual(exec["cwd"], "${configDir}");
+		assert.deepStrictEqual(processContents["plugins"], [processPlugin]);
+		assert.strictEqual(Object.hasOwn(processContents, "excludes"), false);
 	} finally {
 		await prepared.cleanup();
 	}
-	for (const path of generatedPaths) expect(await Bun.file(path).exists()).toBeFalse();
+	for (const path of generatedPaths) assert.strictEqual(existsSync(path), false);
+});
+
+test("appends the generated-config exclude to existing root excludes", async t => {
+	const root = await workspace();
+	const rootConfig = join(root, "dprint.json");
+	const remoteConfig = "https://example.com/configs/process.json";
+	const processPlugin = `https://plugins.dprint.dev/exec-0.7.3.json@${"a".repeat(64)}`;
+	await writeFile(rootConfig, `{ "excludes": ["dist"], "extends": "${remoteConfig}" }`);
+	const graph = await resolveConfigGraph([rootConfig], {
+		fetch: fetchConfigs(t, { [remoteConfig]: `{ "plugins": ["${processPlugin}"] }` }),
+	});
+
+	const prepared = await prepareConfigRoots(graph);
+	try {
+		assert.strictEqual(prepared.materialized, true);
+		const preparedRoot = prepared.roots[0];
+		if (preparedRoot === undefined) throw new Error("Missing prepared config root");
+		const contents = await readJsonObject(preparedRoot);
+		assert.deepStrictEqual(contents["excludes"], ["dist", "**/.dprint-check-*.json"]);
+	} finally {
+		await prepared.cleanup();
+	}
 });

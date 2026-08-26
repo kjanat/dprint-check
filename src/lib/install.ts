@@ -54,7 +54,7 @@ export const installDprint = async (versionInput: string, cacheEnabled: boolean,
 	debug(`Binary install directory: ${binDir}`);
 	debug(`Binary cache key: ${binaryKey}; Actions cache enabled: ${useActionsCache}`);
 
-	if (cacheEnabled && !useActionsCache) warning("GitHub Actions cache is unavailable; downloading dprint directly");
+	if (cacheEnabled && !useActionsCache) info("GitHub Actions cache is unavailable; downloading dprint directly");
 	if (useActionsCache) {
 		try {
 			const hitKey = await restoreCache([binDir], binaryKey);
