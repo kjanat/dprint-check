@@ -36,6 +36,8 @@ export const getInput = (name: string, options: InputOptions = {}): string => {
 	return options.trimWhitespace === false ? value : value.trim();
 };
 
+export const setSecret = (secret: string): void => command("add-mask", secret);
+
 export const debug = (message: string): void => command("debug", message);
 
 export const isDebug = (): boolean => env[ENVIRONMENT.runnerDebug] === "1";
@@ -55,6 +57,12 @@ export const setOutput = (name: string, value: string | boolean): void => {
 	const serialized = String(value);
 	if (!fileCommand(ENVIRONMENT.githubOutputFile, name, serialized)) command("set-output", serialized, { name });
 };
+
+export const saveState = (name: string, value: string): void => {
+	if (!fileCommand(ENVIRONMENT.githubStateFile, name, value)) command("save-state", value, { name });
+};
+
+export const getState = (name: string): string => env[`STATE_${name}`] ?? "";
 
 export const exportVariable = (name: string, value: string): void => {
 	env[name] = value;

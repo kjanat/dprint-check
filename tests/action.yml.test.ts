@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { describe, test } from "node:test";
 import { parse } from "yaml";
 
-import { ACTION_INPUT, ACTION_OUTPUT, DPRINT } from "#lib/contracts";
+import { ACTION_INPUT, ACTION_OUTPUT, ACTION_VALUE, DPRINT } from "#lib/contracts";
 import type declaredAction from "../action.yml.d.ts";
 
 type DeclaredManifest = typeof declaredAction;
@@ -17,7 +17,7 @@ type ManifestOutput = Readonly<{ description: string }>;
 type ActionManifest = Readonly<{
 	inputs: Readonly<Record<string, ManifestInput>>;
 	outputs: Readonly<Record<string, ManifestOutput>>;
-	runs: Readonly<{ using: string; main: string }>;
+	runs: Readonly<{ using: string; main: string; post: string; "post-if": string }>;
 }>;
 
 const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
@@ -35,7 +35,8 @@ const isActionManifest = (value: unknown): value is ActionManifest => {
 	const { inputs, outputs, runs } = value;
 	if (!isRecord(inputs) || !isRecord(outputs) || !isRecord(runs)) return false;
 	return Object.values(inputs).every(isManifestInput) && Object.values(outputs).every(isManifestOutput)
-		&& typeof runs["using"] === "string" && typeof runs["main"] === "string";
+		&& typeof runs["using"] === "string" && typeof runs["main"] === "string" && typeof runs["post"] === "string"
+		&& typeof runs["post-if"] === "string";
 };
 
 const root = dirname(import.meta.dirname);
@@ -47,12 +48,16 @@ const action = manifest;
 expectTypeOf<DeclaredManifest>().not.toBeAny();
 expectTypeOf<DeclaredManifest["runs"]["using"]>().toEqualTypeOf<"node24">();
 expectTypeOf<DeclaredManifest["inputs"]["token"]["default"]>().toEqualTypeOf<"${{ github.token }}">();
+expectTypeOf<DeclaredManifest["inputs"]["cache"]["default"]>().toEqualTypeOf<"true">();
+expectTypeOf<DeclaredManifest["inputs"]["install-only"]["default"]>().toEqualTypeOf<"false">();
 
 describe("action metadata", () => {
-	test("uses Node.js 24 with a bundled entrypoint", () => {
+	test("uses Node.js 24 with an always-running post step", () => {
 		assert.deepStrictEqual(action.runs, {
 			using: "node24",
 			main: "dist/main.mjs",
+			post: "dist/post.mjs",
+			"post-if": "always()",
 		});
 	});
 
@@ -63,6 +68,8 @@ describe("action metadata", () => {
 	const defaults = [
 		[ACTION_INPUT.dprintVersion, DPRINT.latestVersion],
 		[ACTION_INPUT.token, "${{ github.token }}"],
+		[ACTION_INPUT.cache, ACTION_VALUE.true],
+		[ACTION_INPUT.installOnly, ACTION_VALUE.false],
 		[ACTION_INPUT.configPath, ""],
 		[ACTION_INPUT.args, ""],
 	] as const;
@@ -73,13 +80,13 @@ describe("action metadata", () => {
 		});
 	}
 
-	test("declares the installation outputs", () => {
+	test("declares cache and installation outputs", () => {
 		assert.deepStrictEqual(Object.keys(action.outputs).toSorted(), Object.values(ACTION_OUTPUT).toSorted());
 	});
 });
 
-test("bundles exactly the configured entrypoint", async () => {
+test("bundles exactly the configured entrypoints", async () => {
 	const files = await readdir(join(root, "dist"), { withFileTypes: true });
 	const bundlePaths = files.filter(file => file.isFile()).map(file => `dist/${file.name}`).toSorted();
-	assert.deepStrictEqual(bundlePaths, [action.runs.main]);
+	assert.deepStrictEqual(bundlePaths, [action.runs.main, action.runs.post].toSorted());
 });

@@ -1,6 +1,6 @@
 # dprint check action
 
-This action installs dprint, then runs `dprint check` and fails the build if something is not properly formatted.
+This action installs dprint, caches the binary and plugin artifacts, then runs `dprint check`.
 
 ## Usage
 
@@ -14,6 +14,31 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - uses: dprint/check@v3
+```
+
+The cache is enabled by default. Its key includes the dprint version, runner target (including Linux libc), and the
+contents of every root and inherited dprint config. The action warms the plugins after a cache miss so the following
+dprint invocation does not compile them.
+
+To disable caching:
+
+```yml
+- uses: dprint/check@v3
+  with: { cache: false }
+```
+
+GitHub Enterprise Server does not provide the cache service this action uses.
+On GHES the action installs dprint without caching.
+
+### Install only
+
+Set `install-only` to `true` to install dprint and populate its caches without checking formatting. The installed binary is
+added to `PATH` for later steps.
+
+```yml
+- uses: dprint/check@v3
+  with: { install-only: true }
+- run: dprint fmt
 ```
 
 ### Version
@@ -52,6 +77,12 @@ resolved configuration is checked separately:
       https://raw.githubusercontent.com/example2/configs/HEAD/dprint.json
 ```
 
+The cache key follows `extends` recursively, including string or array values and relative links between local or
+remote configs. Mutable remote configs are fetched before cache selection and refreshed before plugin warmup. When a
+remote configuration graph contains a process plugin or a local-directory template, the action materializes that graph
+in the workspace before warmup and checking. This deliberately treats that remote configuration as locally trusted,
+allowing process plugins that dprint otherwise ignores for remote configurations.
+
 ### Args
 
 To pass additional arguments to `dprint check`, pass them to the `args` input.
@@ -74,15 +105,20 @@ E.g. to only check changed files:
 | ---------------- | --------------- | --------------------------------------------- |
 | `dprint-version` | latest          | dprint release to install                     |
 | `token`          | `github.token`  | Token used to query GitHub release metadata   |
+| `cache`          | `true`          | Cache the binary and plugin artifacts         |
+| `install-only`   | `false`         | Install without running `dprint check`        |
 | `config-path`    | auto-discovered | Config path(s), glob(s), or HTTP(S) URL(s)    |
 | `args`           |                 | Additional arguments passed to `dprint check` |
 
 ## Outputs
 
-| Output     | Description                           |
-| ---------- | ------------------------------------- |
-| `version`  | Installed dprint version              |
-| `location` | Absolute path to the installed binary |
+| Output             | Description                                          |
+| ------------------ | ---------------------------------------------------- |
+| `version`          | Installed dprint version                             |
+| `location`         | Absolute path to the installed binary                |
+| `cache-hit`        | Whether the binary was restored from cache           |
+| `plugin-cache-hit` | Whether the exact compiled-plugin cache was restored |
+| `plugin-cache-key` | Cache key for the compiled plugins                   |
 
 ## Troubleshooting
 

@@ -8,6 +8,7 @@ import type { ReleaseAsset } from "#lib/version";
 export const TEST_DPRINT_VERSION = "0.56.1";
 export const TEST_DPRINT_ASSET = "dprint.zip";
 export const TEST_DPRINT_BINARY = "/tools/dprint";
+export const TEST_GNU_PLATFORM = "x86_64-unknown-linux-gnu";
 
 export const releaseAsset = (name: string, digest: string | null = null): ReleaseAsset => ({
 	name,

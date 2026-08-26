@@ -6,11 +6,29 @@ import { describe, test } from "node:test";
 import { promisify } from "node:util";
 
 import { DPRINT, ENVIRONMENT } from "#lib/contracts";
-import { downloadTool, extractZip } from "#lib/tool";
-import { TEST_DPRINT_ASSET, useTestContext } from "#test/helpers";
+import { cacheToolDirectory, downloadTool, extractZip, findTool } from "#lib/tool";
+import { TEST_DPRINT_ASSET, TEST_DPRINT_VERSION, useTestContext } from "#test/helpers";
 
 const execFileAsync = promisify(execFile);
 const context = useTestContext();
+
+test("stores and finds complete tool-cache entries", async () => {
+	const root = await context.temporaryDirectory("dprint-tool-");
+	const source = join(root, "source");
+	const toolCache = join(root, "tool-cache");
+	await mkdir(join(source, "nested"), { recursive: true });
+	await writeFile(join(source, DPRINT.name), "binary");
+	await writeFile(join(source, "nested", "metadata"), "metadata");
+	context.setEnvironment(ENVIRONMENT.runnerToolCache, toolCache);
+
+	assert.strictEqual(findTool(DPRINT.name, TEST_DPRINT_VERSION, "x64"), "");
+	const cached = await cacheToolDirectory(source, DPRINT.name, TEST_DPRINT_VERSION, "x64");
+
+	assert.strictEqual(cached, join(toolCache, DPRINT.name, TEST_DPRINT_VERSION, "x64"));
+	assert.strictEqual(findTool(DPRINT.name, TEST_DPRINT_VERSION, "x64"), cached);
+	assert.strictEqual(await readFile(join(cached, DPRINT.name), "utf8"), "binary");
+	assert.strictEqual(await readFile(join(cached, "nested", "metadata"), "utf8"), "metadata");
+});
 
 describe("downloadTool", () => {
 	test("retries transient responses and streams the download", async t => {

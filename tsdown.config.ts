@@ -1,24 +1,26 @@
-import { readFileSync } from "node:fs";
+import { globSync, readFileSync } from "node:fs";
 import { basename, resolve } from "node:path";
-import { defineConfig } from "tsdown";
+import { defineConfig, type UserConfig } from "tsdown";
 import { parse } from "yaml";
 
-const entry = "./src/main.ts";
-const actionEntrypoint = `dist/${basename(entry, ".ts")}.mjs`;
+const sourceEntrypoints = globSync("src/*.ts", { cwd: import.meta.dirname }).toSorted();
+const actionEntrypoints = sourceEntrypoints.map(source => `dist/${basename(source, ".ts")}.mjs`).toSorted();
 
-const declaresEntrypoint = (manifest: unknown, entrypoint: string): boolean => {
+const declaresEntrypoints = (manifest: unknown, entrypoints: readonly string[]): boolean => {
 	if (typeof manifest !== "object" || manifest === null || !("runs" in manifest)) return false;
 	const { runs } = manifest;
-	if (typeof runs !== "object" || runs === null || !("main" in runs)) return false;
-	return runs.main === entrypoint;
+	if (typeof runs !== "object" || runs === null || !("main" in runs) || !("post" in runs)) return false;
+	const declared = [runs.main, runs.post].toSorted();
+	return declared.length === entrypoints.length
+		&& declared.every((declaredPath, index) => declaredPath === entrypoints[index]);
 };
 
 const manifest: unknown = parse(readFileSync(resolve(import.meta.dirname, "action.yml"), "utf8"));
-if (!declaresEntrypoint(manifest, actionEntrypoint)) {
-	throw new Error(`Expected action.yml to declare runs.main as ${actionEntrypoint}`);
+if (!declaresEntrypoints(manifest, actionEntrypoints)) {
+	throw new Error(`Expected action.yml to declare runs.main and runs.post as ${actionEntrypoints.join(", ")}`);
 }
 
-export default defineConfig({
+const configs = sourceEntrypoints.map(entry => ({
 	entry,
 	minify: true,
 	clean: true,
@@ -40,4 +42,6 @@ export default defineConfig({
 		onlyBundle: false,
 		onlyImport: [],
 	},
-});
+})) satisfies UserConfig[];
+
+export default defineConfig(configs);

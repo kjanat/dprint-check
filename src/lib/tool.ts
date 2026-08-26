@@ -1,11 +1,12 @@
-import { createWriteStream } from "node:fs";
-import { mkdir, rm } from "node:fs/promises";
+import { createWriteStream, existsSync } from "node:fs";
+import { cp, mkdir, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { env } from "node:process";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
+import { debug } from "#lib/actions";
 import { ENVIRONMENT, RUNTIME_OS } from "#lib/contracts";
 import { execFileAsync } from "#lib/exec";
 import { requestWithRetry } from "#lib/http";
@@ -19,6 +20,38 @@ const POWERSHELL_ARGUMENTS = ["-NoLogo", "-NoProfile", "-NonInteractive", "-Comm
 const temporaryRoot = (): string => env[ENVIRONMENT.runnerTemporaryDirectory] ?? tmpdir();
 
 const temporaryDirectory = (prefix: string): Promise<string> => createTemporaryDirectory(temporaryRoot(), prefix);
+
+const toolPath = (tool: string, version: string, architecture: string): string | undefined => {
+	const root = env[ENVIRONMENT.runnerToolCache];
+	return root === undefined || root === "" ? undefined : join(root, tool, version, architecture);
+};
+
+export const findTool = (tool: string, version: string, architecture: string): string => {
+	const path = toolPath(tool, version, architecture);
+	if (path !== undefined && existsSync(path) && existsSync(`${path}.complete`)) return path;
+	return "";
+};
+
+export const cacheToolDirectory = async (
+	sourceDirectory: string,
+	tool: string,
+	version: string,
+	architecture: string,
+): Promise<string> => {
+	const destination = toolPath(tool, version, architecture);
+	if (destination === undefined) {
+		debug(`${ENVIRONMENT.runnerToolCache} is unavailable; skipping tool-cache storage`);
+		return "";
+	}
+	await rm(destination, { recursive: true, force: true });
+	await rm(`${destination}.complete`, { force: true });
+	await mkdir(destination, { recursive: true });
+	for (const entry of await readdir(sourceDirectory)) {
+		await cp(join(sourceDirectory, entry), join(destination, entry), { recursive: true });
+	}
+	await writeFile(`${destination}.complete`, "");
+	return destination;
+};
 
 export const downloadTool = async (url: string, options: DownloadOptions = {}): Promise<string> => {
 	const directory = await temporaryDirectory("dprint-download-");

@@ -2,7 +2,7 @@
 	"name": "dprint-check-action",
 	"version": "3.0.0",
 	"private": true,
-	"description": "GitHub Action to install dprint and check formatting",
+	"description": "GitHub Action to install dprint with caching and check formatting",
 	"type": "module",
 	"imports": {
 		"#*": "./src/*.ts",
@@ -25,7 +25,8 @@
 	},
 	"knip": {
 		"entry": [
-			"src/main.ts"
+			"src/main.ts",
+			"src/post.ts"
 		]
 	},
 	"dependencies": {
