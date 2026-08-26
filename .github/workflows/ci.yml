@@ -1,44 +1,76 @@
+# yaml-language-server: $schema=https://www.schemastore.org/github-workflow.json
+---
 name: CI
-
-on: [push, pull_request]
-
+on:
+  push: { branches: [main] }
+  pull_request:
+  workflow_dispatch:
+concurrency:
+  group: "${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}"
+  queue: single
+  cancel-in-progress: true
+permissions: { contents: read }
+env:
+  DPRINT_VERSION: "0.56.1"
+  NODE_VERSION: "24"
+defaults: { run: { shell: pwsh } }
 jobs:
-  style:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: &checkout-action actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+        with: { node-version: "${{ env.NODE_VERSION }}", cache: npm }
+      - run: npm ci
+      - run: npm run build
+      - name: Validate built action
+        run: |
+          $main = node -e "const { readFileSync } = require('node:fs'); const { parse } = require('yaml'); console.log(parse(readFileSync('action.yml', 'utf8')).runs.main)"
+          if (-not (Test-Path -LiteralPath $main -PathType Leaf)) { throw "Missing $main" }
+          node --check $main
+      - run: npm run biome:check
+      - run: npm run typecheck
+      - run: npm test
+      - run: npm run knip
+      - name: dprint check (action)
+        uses: ./
+        with: { dprint-version: "${{ env.DPRINT_VERSION }}", config-path: dprint.json }
+      - name: Upload built action
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with: { name: action-dist, path: dist, if-no-files-found: error, retention-days: 1 }
+
+  behavior:
+    needs: quality
     runs-on: ${{ matrix.os }}
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macOS-latest, windows-latest]
+    strategy: { matrix: { os: [ubuntu-latest, macos-latest, windows-latest] } }
     steps:
       - name: Use LF line endings
+        uses: $/actions/git-lf
+
+      - uses: *checkout-action
+      - name: Download built action
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        with: { name: action-dist, path: dist }
+
+      - name: Check formatting
+        id: dprint
+        uses: ./
+        with: { dprint-version: "${{ env.DPRINT_VERSION }}" }
+
+      - name: Verify installation outputs
+        env: { OUTPUTS: "${{ toJSON(steps.dprint.outputs) }}" }
         run: |
-          git config --global core.autocrlf false
-          git config --global core.eol lf
+          $outputs = $env:OUTPUTS | ConvertFrom-Json
+          if ($outputs.version -ne $env:DPRINT_VERSION)        { throw "Wrong dprint version"  }
+          if (-not (Test-Path -LiteralPath $outputs.location)) { throw "Missing dprint binary" }
+          dprint --version
 
-      - uses: actions/checkout@v4
-
-      - name: Check formatting latest
-        uses: ./
-
-      - name: Check formatting specific version
-        uses: ./
-        with:
-          dprint-version: 0.49.1
-
-      - name: Check formatting specific config
-        uses: ./
-        with:
-          config-path: "dprint.json"
-
-      - name: Check formatting specific version and config
-        uses: ./
-        with:
-          dprint-version: 0.49.1
-          config-path: "dprint.json"
-
-      - name: make poorly-formatted json file
-        run: |
-          echo '{"a": 1, "b": 2}' > poorly-formatted.json
+      - name: Make poorly formatted JSON file
+        env: { BAD_JSON: '{"a": 1, "b": 2}' }
+        run: '[IO.File]::WriteAllText((Join-Path $PWD "poorly-formatted.json"), $env:BAD_JSON)'
       - name: Check formatting with excludes
         uses: ./
         with:
+          dprint-version: ${{ env.DPRINT_VERSION }}
+          config-path: dprint.json
           args: --excludes poorly-formatted.json

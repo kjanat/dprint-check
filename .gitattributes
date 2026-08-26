@@ -1,0 +1,3 @@
+.zed/*.json                         linguist-language=JSONC
+package-lock.json                   linguist-generated
+tests/fixtures/release-assets.json  linguist-generated

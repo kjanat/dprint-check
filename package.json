@@ -1,0 +1,63 @@
+{
+	"name": "dprint-check-action",
+	"version": "3.0.0",
+	"private": true,
+	"description": "GitHub Action to install dprint and check formatting",
+	"type": "module",
+	"imports": {
+		"#*": "./src/*.ts",
+		"#lib/*": "./src/lib/*.ts",
+		"#test/*": "./tests/*",
+		"#test/helpers": "./tests/helpers.ts",
+		"#pkg": "./package.json"
+	},
+	"repository": "https://github.com/dprint/check",
+	"scripts": {
+		"biome:check": "biome check",
+		"build": "tsdown",
+		"build:watch": "tsdown --watch",
+		"check": "npm run fmt:check && npm run biome:check && npm run typecheck && npm test && npm run knip",
+		"fmt": "dprint fmt",
+		"fmt:check": "if [ \"${CI}\" = \"true\" ]; then echo 'Skipping dprint in CI to avoid pre-populating its cache'; else dprint check; fi",
+		"test": "node --test \"tests/**/*.test.ts\"",
+		"knip": "knip",
+		"typecheck": "tsc --noEmit"
+	},
+	"knip": {
+		"entry": [
+			"src/main.ts"
+		]
+	},
+	"dependencies": {
+		"detect-libc": "^2.1.2"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.5.10",
+		"@types/node": "^24",
+		"dprint": "0.56.1",
+		"expect-type": "^1.4.0",
+		"knip": "^6.32.2",
+		"tsdown": ">=0.22",
+		"typescript": "^7",
+		"yaml": "^2.9.0"
+	},
+	"packageManager": "npm@11.17.0",
+	"engines": {
+		"node": "24"
+	},
+	"devEngines": {
+		"runtime": {
+			"name": "node",
+			"version": "^24",
+			"onFail": "download"
+		},
+		"packageManager": {
+			"name": "npm",
+			"version": ">=11",
+			"onFail": "error"
+		}
+	},
+	"volta": {
+		"node": "24.19.0"
+	}
+}

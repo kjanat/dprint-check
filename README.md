@@ -1,71 +1,88 @@
 # dprint check action
 
-This action runs `dprint check` on your source code and fails the build if something is not properly formatted.
+This action installs dprint, then runs `dprint check` and fails the build if something is not properly formatted.
 
 ## Usage
 
 1. Checkout your repo.
-2. Run `dprint/check` action.
+2. Run the `dprint/check` action.
 
 ```yml
 jobs:
   style:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: dprint/check@v2.3
+      - uses: actions/checkout@v7
+      - uses: dprint/check@v3
 ```
 
-If you are using a matrix, most likely you will only want to run it only on Linux. For example:
+### Version
+
+By default, the action discovers the latest dprint release and selects the published ZIP matching the runner. To use a
+specific release:
 
 ```yml
-- uses: dprint/check@v2.3
-  if: runner.os == 'Linux'
+- uses: dprint/check@v3
+  with: { dprint-version: 0.30.3 }
 ```
 
-### Latest Version
+Downloads are verified with the asset's SHA-256 digest. For older releases without asset digests, the action discovers
+and uses the release's `SHASUMS256.txt` asset. Releases without either are rejected before downloading the binary; in
+dprint's published release history, this means versions before `0.14.0` cannot be installed by this action.
 
-By default, `dprint/check` uses the latest version of dprint.
+### Config path
 
-### Specific Version
-
-To use a specific version, specify that with the `dprint-version` input:
+By default, dprint auto-discovers its configuration. `config-path` also accepts a local path, glob, or remote HTTP(S)
+URL:
 
 ```yml
-- uses: dprint/check@v2.3
+- uses: dprint/check@v3
   with:
-    dprint-version: 0.30.3
+    config-path: https://raw.githubusercontent.com/example/configs/HEAD/dprint.json
 ```
 
-### Config Path
-
-By default, `dprint/check` uses the auto-discovered configuration file.
-
-### Specific Config
-
-To use a specific config, specify that with the `config-path` input:
+To check multiple explicit configurations, separate paths, globs, or URLs with line breaks, tabs, or `|`. Each
+resolved configuration is checked separately:
 
 ```yml
-- uses: dprint/check@v2.3
+- uses: dprint/check@v3
   with:
-    config-path: dprint-ci.json
+    config-path: |
+      https://raw.githubusercontent.com/example1/configs/HEAD/dprint.json
+      https://raw.githubusercontent.com/example2/configs/HEAD/dprint.json
 ```
 
 ### Args
 
-To pass additional arguments to `dprint check`, pass them to the `args` input. E.g. to only check changed files:
+To pass additional arguments to `dprint check`, pass them to the `args` input.
+E.g. to only check changed files:
 
 ```yml
 - name: Get changed files
   id: changed-files
   uses: tj-actions/changed-files@v45
-- uses: dprint/check@v2.3
+- uses: dprint/check@v3
   with:
     args: >-
       --allow-no-files
       ${{ steps.changed-files.outputs.all_changed_files }}
 ```
+
+## Inputs
+
+| Input            | Default         | Description                                   |
+| ---------------- | --------------- | --------------------------------------------- |
+| `dprint-version` | latest          | dprint release to install                     |
+| `token`          | `github.token`  | Token used to query GitHub release metadata   |
+| `config-path`    | auto-discovered | Config path(s), glob(s), or HTTP(S) URL(s)    |
+| `args`           |                 | Additional arguments passed to `dprint check` |
+
+## Outputs
+
+| Output     | Description                           |
+| ---------- | ------------------------------------- |
+| `version`  | Installed dprint version              |
+| `location` | Absolute path to the installed binary |
 
 ## Troubleshooting
 
@@ -73,15 +90,17 @@ To pass additional arguments to `dprint check`, pass them to the `args` input. E
 
 When running on Windows, you may get a lot of messages like:
 
-```
+```plaintext
 from D:\a\check\check\README.md:
  | Text differed by line endings.
 --
 ```
 
-This is because unfortunately git is configured in GH actions to check out line endings as CRLF (`\r\n`).
+This is because unfortunately git is configured in GH actions to check out line
+endings as CRLF (`\r\n`).
 
-You can fix this by only running the action on Linux as shown above (recommended), or to do the following before checking out the repo:
+You can fix this by only running the action on Linux as shown above (recommended),
+or to do the following before checking out the repo:
 
 ```yml
 - name: Ensure LF line endings for Windows
@@ -89,5 +108,8 @@ You can fix this by only running the action on Linux as shown above (recommended
     git config --global core.autocrlf false
     git config --global core.eol lf
 
-- uses: actions/checkout@v4
+# or use our re-useable action to do this for you:
+- uses: dprint/check/actions/git-lf@v3
+
+- uses: actions/checkout@v7
 ```
