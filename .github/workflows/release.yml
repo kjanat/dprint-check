@@ -85,6 +85,7 @@ jobs:
     needs: [build, verify]
     runs-on: ubuntu-latest
     outputs:
+      release-id: "${{ steps.release.outputs.release-id }}"
       release-sha: "${{ steps.release.outputs.release-sha }}"
       release-url: "${{ steps.release.outputs.release-url }}"
     permissions: { contents: write }
@@ -124,8 +125,8 @@ jobs:
         if: ${{ !inputs.finalize }}
         env:
           GH_TOKEN: "${{ github.token }}"
+          RELEASE_ID: "${{ needs.draft.outputs.release-id }}"
           RELEASE_SHA: "${{ needs.draft.outputs.release-sha }}"
-          RELEASE_URL: "${{ needs.draft.outputs.release-url }}"
         run: ./.github/scripts/Publish-Release.ps1
       - uses: *checkout-action
         with:

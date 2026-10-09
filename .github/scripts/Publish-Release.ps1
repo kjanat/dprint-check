@@ -8,7 +8,8 @@ trap { Write-UnhandledReleaseError $_; break }
 
 $version = Get-RequiredEnvironmentVariable 'VERSION'
 $releaseSha = Get-RequiredEnvironmentVariable 'RELEASE_SHA'
-$releaseUrl = Get-RequiredEnvironmentVariable 'RELEASE_URL'
+$releaseId = Get-RequiredEnvironmentVariable 'RELEASE_ID'
+if ($releaseId -notmatch '^[1-9]\d*$') { Write-ReleaseError 'Release ID must be a positive integer' }
 $null = Assert-StableReleaseVersion $version
 Assert-ReleaseChecksum -Root candidate
 
@@ -17,8 +18,8 @@ if ($matches.Count -ne 1) {
 	Write-ReleaseError "Expected one release for $version, found $($matches.Count)"
 }
 $release = $matches[0]
-if ($release.html_url -ne $releaseUrl) {
-	Write-ReleaseError "Release URL is $($release.html_url), expected $releaseUrl"
+if ([string] $release.id -ne $releaseId) {
+	Write-ReleaseError "Release ID is $($release.id), expected $releaseId"
 }
 if ($release.target_commitish -ne $releaseSha) {
 	Write-ReleaseError "Release targets $($release.target_commitish), expected $releaseSha"
@@ -30,7 +31,7 @@ if (Compare-Object $expectedAssets $assetNames) {
 }
 
 if ($release.draft) {
-	gh release edit $version --draft=false
+	$null = Invoke-GitHubApi -Method PATCH -Path "repos/{owner}/{repo}/releases/$releaseId" -Body @{ draft = $false }
 }
 else {
 	Write-Output "$version is already published; continuing with final verification"
@@ -39,6 +40,9 @@ else {
 $published = @(Get-ReleaseHistory | Where-Object tag_name -EQ $version)
 if ($published.Count -ne 1 -or $published[0].draft -or -not $published[0].published_at) {
 	Write-ReleaseError "$version was not published"
+}
+if ([string] $published[0].id -ne $releaseId) {
+	Write-ReleaseError "Published release ID is $($published[0].id), expected $releaseId"
 }
 if ($published[0].target_commitish -ne $releaseSha) {
 	Write-ReleaseError "Published release targets $($published[0].target_commitish), expected $releaseSha"

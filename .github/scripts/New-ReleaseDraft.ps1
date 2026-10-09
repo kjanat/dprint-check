@@ -107,6 +107,7 @@ if (Compare-Object $expectedAssets $assetNames) {
 }
 
 Add-GitHubOutput 'release-sha' $releaseSha
+Add-GitHubOutput 'release-id' ([string] $release.id)
 Add-GitHubOutput 'release-url' $release.html_url
 
 $summaryPath = Get-RequiredEnvironmentVariable 'GITHUB_STEP_SUMMARY'

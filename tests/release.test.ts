@@ -1,22 +1,27 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { describe, test } from "node:test";
 
 import { execFileAsync } from "#lib/exec";
+import { useTestContext } from "#test/helpers";
 
 const root = dirname(import.meta.dirname);
 const commonScript = join(root, ".github", "scripts", "Release.Common.ps1");
-const invokePowerShell = async (script: string) =>
+const publishScript = join(root, ".github", "scripts", "Publish-Release.ps1");
+const context = useTestContext();
+const invokePowerShell = async (script: string, workingDirectory = root) =>
 	(
 		await execFileAsync(
 			"pwsh",
 			["-NoProfile", "-NonInteractive", "-Command", script],
-			{ cwd: root },
+			{ cwd: workingDirectory },
 		)
 	).stdout.trimEnd();
 
-const invokeFailingPowerShell = (script: string): Promise<unknown> =>
-	invokePowerShell(script).then(() => undefined, (error: unknown) => error);
+const invokeFailingPowerShell = (script: string, workingDirectory = root): Promise<unknown> =>
+	invokePowerShell(script, workingDirectory).then(() => undefined, (error: unknown) => error);
 
 function assertPowerShellFailure(value: unknown): asserts value is Error & { stdout: string } {
 	assert.ok(value instanceof Error);
@@ -33,6 +38,51 @@ const parseJsonString = (output: string): string => {
 };
 
 describe("release PowerShell", () => {
+	for (const expectedId of [123, 999]) {
+		test(`publishes an edited draft by stable ID and rejects mismatched ID ${expectedId}`, async () => {
+			const directory = await context.temporaryDirectory("dprint-publish-");
+			await mkdir(join(directory, "candidate", "dist"), { recursive: true });
+			await writeFile(join(directory, "candidate", "dist", "main.mjs"), "bundle");
+			const hash = createHash("sha256").update("bundle").digest("hex");
+			await writeFile(join(directory, "candidate", "SHA256SUMS"), `${hash}  dist/main.mjs\n`);
+			const script = `
+$env:VERSION = 'v3.1.0'
+$env:RELEASE_SHA = 'verified-sha'
+$env:RELEASE_ID = '${expectedId}'
+$env:RUNNER_TEMP = '${directory}'
+$script:release = [pscustomobject]@{
+	id = 123
+	tag_name = 'v3.1.0'
+	target_commitish = 'verified-sha'
+	html_url = 'https://github.com/owner/repo/releases/tag/untagged-edited'
+	draft = $true
+	published_at = $null
+	assets = @([pscustomobject]@{ name = 'main.mjs' }, [pscustomobject]@{ name = 'SHA256SUMS' })
+}
+function gh {
+	if ($args[0] -ne 'api') { throw 'Unexpected command' }
+	if ($args -contains 'PATCH') {
+		if ($args -notcontains 'repos/{owner}/{repo}/releases/123') { throw 'Incorrect publication target' }
+		$script:release.draft = $false
+		$script:release.published_at = '2026-10-09T00:00:00Z'
+		$script:release | ConvertTo-Json -Depth 5 -Compress
+	} else {
+		ConvertTo-Json -InputObject @(@($script:release)) -Depth 5 -Compress
+	}
+}
+. '${publishScript}'
+"published=$(-not $script:release.draft)"
+`;
+			if (expectedId === 123) {
+				assert.equal(await invokePowerShell(script, directory), "published=True");
+			} else {
+				const failure = await invokeFailingPowerShell(script, directory);
+				assertPowerShellFailure(failure);
+				assert.match(failure.stdout, /Release ID is 123, expected 999/u);
+			}
+		});
+	}
+
 	test("all release scripts parse", async () => {
 		const output = await invokePowerShell(`
 $failed = $false
