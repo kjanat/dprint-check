@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { describe, test } from "node:test";
 import type { TestContext } from "node:test";
@@ -13,6 +13,7 @@ import {
 	resolveConfigGraph,
 } from "#lib/config";
 import { DPRINT, ENVIRONMENT } from "#lib/contracts";
+import { parseRepository } from "#lib/repository";
 import { TEST_DPRINT_VERSION, TEST_GNU_PLATFORM, useTestContext } from "#test/helpers";
 
 const context = useTestContext();
@@ -71,11 +72,14 @@ describe("findConfigFiles", () => {
 
 	test("uses the same root config precedence as dprint", async () => {
 		const root = await workspace();
-		for (const name of [".dprint.jsonc", ".dprint.json", "dprint.jsonc", "dprint.json"]) {
-			await writeFile(join(root, name), "{}");
+		const names = ["dprint.json", "dprint.jsonc", ".dprint.json", ".dprint.jsonc", "dprint.toml", ".dprint.toml"];
+		for (const name of names) {
+			await writeFile(join(root, name), name.endsWith(".toml") ? "plugins = []" : "{}");
 		}
-
-		assert.strictEqual((await findConfigFiles())[0], join(root, "dprint.json"));
+		for (const name of names) {
+			assert.strictEqual((await findConfigFiles())[0], join(root, name));
+			await rm(join(root, name));
+		}
 	});
 
 	test("resolves a custom config path from the workspace", async () => {
@@ -114,6 +118,67 @@ describe("findConfigFiles", () => {
 });
 
 describe("resolveConfigGraph", () => {
+	for (const extendsValue of ["\"./base.json\"", "[\"./base.json\"]"]) {
+		test(`resolves TOML extends ${extendsValue} through mixed formats`, async () => {
+			const root = await workspace();
+			const toml = join(root, "dprint.toml");
+			const json = join(root, "base.json");
+			const child = join(root, "child.toml");
+			await writeFile(toml, `extends = ${extendsValue}\nplugins = []`);
+			await writeFile(json, "{\"extends\":\"./child.toml\"}");
+			await writeFile(child, "[typescript]\nlineWidth = 100");
+			const graph = await resolveConfigGraph([toml]);
+			assert.deepStrictEqual(graph.sources.map(source => source.source).sort(), [toml, json, child].sort());
+			await writeFile(child, "[typescript]\nlineWidth = 120");
+			const changed = await resolveConfigGraph([toml]);
+			assert.notStrictEqual(
+				computeCacheKey(graph, TEST_DPRINT_VERSION, TEST_GNU_PLATFORM).primaryKey,
+				computeCacheKey(changed, TEST_DPRINT_VERSION, TEST_GNU_PLATFORM).primaryKey,
+			);
+		});
+	}
+
+	test("detects extensionless TOML and JSONC from their content", async t => {
+		await workspace();
+		const url = "https://example.com/config";
+		for (const content of ["extends = \"./base.toml\"", "/* comment */ {\"extends\":\"./base.toml\"}"]) {
+			const graph = await resolveConfigGraph([url], {
+				fetch: fetchConfigs(t, { [url]: content, "https://example.com/base.toml": "plugins = []" }),
+			});
+			assert.strictEqual(graph.sources.length, 2);
+		}
+	});
+
+	test("parses remote TOML using the final URL pathname after a redirect", async t => {
+		await workspace();
+		const initial = "https://example.com/config.json";
+		const final = "https://example.com/configs/dprint.toml?revision=1";
+		const child = "https://example.com/configs/base.json";
+		const fetch = t.mock.fn(async (input: string | URL): Promise<Response> => {
+			const url = String(input);
+			if (url === initial) return new Response(null, { status: 302, headers: { location: final } });
+			if (url === final) return new Response("extends = \"./base.json\"\nplugins = []");
+			if (url === child) return new Response("{}");
+			return new Response("not found", { status: 404 });
+		});
+		const graph = await resolveConfigGraph([initial], { fetch });
+		assert.deepStrictEqual(graph.rootSources, [final]);
+		assert.deepStrictEqual(graph.sources.map(source => source.source), [final, child]);
+	});
+
+	for (const content of ["plugins = [", "extends = [3]"]) {
+		test(`rejects invalid TOML configuration: ${content}`, async () => {
+			const root = await workspace();
+			const path = join(root, "dprint.toml");
+			await writeFile(path, content);
+			await assert.rejects(
+				resolveConfigGraph([path]),
+				includesMessage(
+					content === "plugins = [" ? "Failed parsing dprint config" : "Invalid extends",
+				),
+			);
+		});
+	}
 	test("resolves local and remote extends recursively", async t => {
 		const root = await workspace();
 		const rootConfig = join(root, "dprint.jsonc");
@@ -270,6 +335,17 @@ describe("resolveConfigGraph", () => {
 });
 
 describe("computeCacheKey", () => {
+	test("isolates repositories in primary and fallback cache keys", async () => {
+		const root = await workspace();
+		const path = join(root, "dprint.json");
+		await writeFile(path, "{}");
+		const graph = await resolveConfigGraph([path]);
+		const fork = computeCacheKey(graph, TEST_DPRINT_VERSION, TEST_GNU_PLATFORM, parseRepository());
+		const upstream = computeCacheKey(graph, TEST_DPRINT_VERSION, TEST_GNU_PLATFORM, parseRepository("dprint/dprint"));
+		assert.notStrictEqual(fork.primaryKey, upstream.primaryKey);
+		for (const prefix of upstream.restoreKeys) assert.ok(!fork.primaryKey.startsWith(prefix));
+		for (const prefix of fork.restoreKeys) assert.ok(!upstream.primaryKey.startsWith(prefix));
+	});
 	test("is stable and changes with local config contents", async () => {
 		const root = await workspace();
 		const config = join(root, "dprint.json");
@@ -313,7 +389,7 @@ describe("computeCacheKey", () => {
 			const graph = await resolveConfigGraph([config]);
 
 			const result = computeCacheKey(graph, TEST_DPRINT_VERSION, platformKey);
-			const platformPrefix = `${DPRINT.name}-plugins-v${DPRINT.pluginCacheVersion}-${platformKey}`;
+			const platformPrefix = `${DPRINT.name}-plugins-v${DPRINT.pluginCacheVersion}-kjanat_dprint+${platformKey}`;
 			assert.ok(result.primaryKey.startsWith(`${platformPrefix}-${TEST_DPRINT_VERSION}-`));
 			assert.deepStrictEqual(result.restoreKeys, [`${platformPrefix}-${TEST_DPRINT_VERSION}-`, `${platformPrefix}-`]);
 		});
@@ -392,4 +468,37 @@ test("appends the generated-config exclude to existing root excludes", async t =
 	} finally {
 		await prepared.cleanup();
 	}
+});
+
+test("materializes and cleans remote TOML process-plugin configurations", async t => {
+	const root = await workspace();
+	const remote = "https://example.com/dprint.toml?revision=1";
+	const graph = await resolveConfigGraph([remote], {
+		fetch: fetchConfigs(t, {
+			[remote]:
+				"extends = \"./base.json\"\nplugins = [\"./exec.json\"]\nexcludes = [\"dist\"]\n[typescript]\nlineWidth = 120\n[exec]\ncwd = \"${configDir}\"\n[[exec.commands]]\ncommand = \"test\"",
+			"https://example.com/base.json": "{\"lineWidth\":100}",
+		}),
+	});
+	const prepared = await prepareConfigRoots(graph);
+	const generated: string[] = [];
+	try {
+		assert.strictEqual(prepared.materialized, true);
+		const preparedRoot = prepared.roots[0];
+		assert.ok(preparedRoot !== undefined);
+		generated.push(preparedRoot);
+		assert.strictEqual(dirname(preparedRoot), root);
+		const contents = await readJsonObject(preparedRoot);
+		assert.deepStrictEqual(contents["plugins"], ["https://example.com/exec.json"]);
+		assert.deepStrictEqual(contents["typescript"], { lineWidth: 120 });
+		assert.deepStrictEqual(contents["exec"], { cwd: "${configDir}", commands: [{ command: "test" }] });
+		assert.deepStrictEqual(contents["excludes"], ["dist", "**/.dprint-check-*.json"]);
+		const inherited = contents["extends"];
+		assert.ok(typeof inherited === "string");
+		generated.push(inherited);
+		assert.deepStrictEqual(await readJsonObject(inherited), { lineWidth: 100 });
+	} finally {
+		await prepared.cleanup();
+	}
+	for (const path of generated) assert.strictEqual(existsSync(path), false);
 });

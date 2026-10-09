@@ -1,13 +1,22 @@
 import { createHash, randomUUID } from "node:crypto";
 import { glob, readFile, rm, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+import { dirname, extname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { cwd, env } from "node:process";
 import { fileURLToPath, URL } from "node:url";
 
 import { DPRINT, ENVIRONMENT } from "#lib/contracts";
 import { requestWithRetry, type RetryTransportOptions } from "#lib/http";
+import { parseRepository, type ReleaseRepository } from "#lib/repository";
+import { parseTomlConfig } from "#lib/toml";
 
-const CONFIG_NAMES = ["dprint.json", "dprint.jsonc", ".dprint.json", ".dprint.jsonc"] as const;
+const CONFIG_NAMES = [
+	"dprint.json",
+	"dprint.jsonc",
+	".dprint.json",
+	".dprint.jsonc",
+	"dprint.toml",
+	".dprint.toml",
+] as const;
 const GENERATED_CONFIG_PREFIX = ".dprint-check-";
 const GENERATED_CONFIG_EXCLUDE = `**/${GENERATED_CONFIG_PREFIX}*.json`;
 const MAX_REDIRECTS = 10;
@@ -146,18 +155,26 @@ export const findConfigFiles = async (customPath?: string): Promise<string[]> =>
 const configObject = (content: string, source: string): Record<string, unknown> => {
 	let config: unknown;
 	try {
-		config = JSON.parse(normalizeJsonc(content.replace(/^\uFEFF/u, ""), source));
+		const text = content.replace(/^\uFEFF/u, "");
+		const extension = extname(remoteUrl(source)?.pathname ?? source).toLowerCase();
+		const firstToken = nextJsonToken(text, 0);
+		const toml = extension === ".toml"
+			|| (extension !== ".json" && extension !== ".jsonc" && firstToken !== undefined && firstToken !== "{");
+		config = toml ? parseTomlConfig(text) : JSON.parse(normalizeJsonc(text, source));
 	} catch (error) {
 		if (error instanceof Error && error.message.startsWith("Failed parsing dprint config")) throw error;
 		throw new Error(
 			`Failed parsing dprint config ${source}: ${error instanceof Error ? error.message : String(error)}`,
 		);
 	}
-	if (config === null || typeof config !== "object" || Array.isArray(config)) {
+	if (!isConfigObject(config)) {
 		throw new Error(`Failed parsing dprint config ${source}: expected an object`);
 	}
-	return config as Record<string, unknown>;
+	return config;
 };
+
+const isConfigObject = (value: unknown): value is Record<string, unknown> =>
+	value !== null && typeof value === "object" && !Array.isArray(value);
 
 const configExtends = (content: string, source: string): string[] => {
 	const value = configObject(content, source).extends;
@@ -193,7 +210,7 @@ const resolveConfigReference = (value: string, current: string, origin: string):
 		}
 		return new URL(expanded, current).href;
 	}
-	if (isAbsolute(expanded)) return expanded;
+	if (isAbsolute(expanded)) return resolve(expanded);
 	const url = parseUrl(expanded);
 	if (url?.protocol === "file:") return fileURLToPath(url);
 	if (url !== undefined) {
@@ -369,6 +386,7 @@ export const computeCacheKey = (
 	config: ConfigGraph,
 	dprintVersion: string,
 	platformKey: string,
+	repository: ReleaseRepository = parseRepository(),
 ): { primaryKey: string; restoreKeys: string[] } => {
 	const hash = createHash(DPRINT.sha256Algorithm);
 	for (const root of [...config.roots].sort()) {
@@ -384,7 +402,7 @@ export const computeCacheKey = (
 		hash.update("\0");
 	}
 	const digest = hash.digest("hex");
-	const platformPrefix = `${DPRINT.name}-plugins-v${DPRINT.pluginCacheVersion}-${platformKey}`;
+	const platformPrefix = `${DPRINT.name}-plugins-v${DPRINT.pluginCacheVersion}-${repository.cacheKey}+${platformKey}`;
 	const prefix = `${platformPrefix}-${dprintVersion}`;
 
 	return {

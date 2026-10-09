@@ -37,7 +37,12 @@ jobs:
       - run: npm run knip
       - name: dprint check (action)
         uses: ./
-        with: { dprint-version: "${{ env.DPRINT_VERSION }}", config-path: dprint.json, cache: false }
+        with: {
+          repository: dprint/dprint,
+          dprint-version: "${{ env.DPRINT_VERSION }}",
+          config-path: dprint.json,
+          cache: false,
+        }
       - name: Upload built action
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with: { name: action-dist, path: dist, if-no-files-found: error, retention-days: 1 }
@@ -59,7 +64,7 @@ jobs:
       - name: Check formatting
         id: dprint
         uses: ./
-        with: { dprint-version: "${{ env.DPRINT_VERSION }}", cache: false }
+        with: { repository: dprint/dprint, dprint-version: "${{ env.DPRINT_VERSION }}", cache: false }
 
       - name: Verify installation outputs
         env: { OUTPUTS: "${{ toJSON(steps.dprint.outputs) }}" }
@@ -78,6 +83,7 @@ jobs:
       - name: Check formatting with excludes
         uses: ./
         with:
+          repository: dprint/dprint
           dprint-version: ${{ env.DPRINT_VERSION }}
           config-path: dprint.json
           args: --excludes poorly-formatted.json
@@ -129,8 +135,10 @@ jobs:
         continue-on-error: true
         uses: ./
         with:
+          repository: dprint/dprint
           dprint-version: "${{ env.DPRINT_VERSION }}"
           config-path: "${{ env.CACHE_TEST_CONFIG }}"
+          cache-binary: true
       - name: Verify cache miss and formatting failure
         env:
           OUTCOME: "${{ steps.dprint.outcome }}"
@@ -155,8 +163,10 @@ jobs:
       - id: dprint
         uses: ./
         with:
+          repository: dprint/dprint
           dprint-version: "${{ env.DPRINT_VERSION }}"
           config-path: "${{ env.CACHE_TEST_CONFIG }}"
+          cache-binary: true
       - name: Verify exact cache hits
         env: { OUTPUTS: "${{ toJSON(steps.dprint.outputs) }}" }
         run: |

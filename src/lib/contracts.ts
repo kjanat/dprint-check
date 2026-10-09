@@ -2,9 +2,12 @@ export const ACTION_INPUT = {
 	annotations: "annotations",
 	args: "args",
 	cache: "cache",
+	cacheBinary: "cache-binary",
 	configPath: "config-path",
 	dprintVersion: "dprint-version",
 	installOnly: "install-only",
+	repository: "repository",
+	review: "review",
 	token: "token",
 } as const;
 

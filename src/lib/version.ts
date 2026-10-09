@@ -2,6 +2,7 @@ import type { OutgoingHttpHeaders } from "node:http";
 
 import { DPRINT } from "#lib/contracts";
 import { GITHUB_API, githubApiHeaders } from "#lib/github";
+import { parseRepository, type ReleaseRepository } from "#lib/repository";
 
 export interface ReleaseAsset {
 	name: string;
@@ -53,11 +54,13 @@ export const resolveRelease = async (
 	input: string,
 	token = "",
 	http: JsonClient = jsonClient,
+	repository: ReleaseRepository = parseRepository(),
 ): Promise<Release> => {
 	const requested = specifiedVersion(input);
+	const releasesUrl = `${GITHUB_API.baseUrl}/repos/${repository.name}/releases`;
 	const endpoint = requested === undefined
-		? `${GITHUB_API.dprintReleasesUrl}/${DPRINT.latestVersion}`
-		: `${GITHUB_API.dprintReleasesUrl}/tags/${encodeURIComponent(requested)}`;
+		? `${releasesUrl}/${DPRINT.latestVersion}`
+		: `${releasesUrl}/tags/${encodeURIComponent(requested)}`;
 	const response = await http.getJson<unknown>(endpoint, githubApiHeaders(token));
 	if (response.statusCode === 404) {
 		throw new Error(

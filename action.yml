@@ -4,18 +4,26 @@ name: "dprint-check-action"
 description: "Install dprint with caching, then check source formatting"
 author: "kjanat"
 inputs:
+  repository:
+    description: "GitHub repository containing dprint releases (owner/repo)"
+    required: false
+    default: "kjanat/dprint"
   dprint-version:
     description: "Specific dprint version to use (ex. 0.56.1; defaults to latest)"
     required: false
     default: "latest"
   token:
-    description: "GitHub token used to query dprint release metadata"
+    description: "GitHub token used for release metadata and optional PR reviews"
     required: false
     default: "${{ github.token }}"
   cache:
-    description: "Cache the dprint binary and plugin artifacts"
+    description: "Cache the dprint plugin store (DPRINT_CACHE_DIR)"
     required: false
     default: "true"
+  cache-binary:
+    description: "Cache the dprint binary via tool-cache and Actions cache"
+    required: false
+    default: "false"
   install-only:
     description: "Install dprint and populate its caches without running dprint check"
     required: false
@@ -28,6 +36,10 @@ inputs:
     description: "Emit GitHub file annotations for formatting failures"
     required: false
     default: "true"
+  review:
+    description: "Post one PR review with inline formatting suggestions (requires pull-requests: write)"
+    required: false
+    default: "false"
   args:
     description: "Additional arguments to pass to dprint check"
     required: false

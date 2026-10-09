@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import { cp, mkdir } from "node:fs/promises";
 import { homedir } from "node:os";
@@ -11,13 +12,19 @@ import { ACTION_OUTPUT, ACTION_STATE, DPRINT, ENVIRONMENT, RUNTIME_OS } from "#l
 import { describeError } from "#lib/error";
 import { execFileAsync } from "#lib/exec";
 import { resolveRuntimePlatform, selectReleaseAsset } from "#lib/platform";
+import { parseRepository, type ReleaseRepository } from "#lib/repository";
 import { cacheToolDirectory, downloadTool, extractZip, findTool } from "#lib/tool";
 import type { Release, ReleaseAsset } from "#lib/version";
 import { resolveRelease, specifiedVersion } from "#lib/version";
 
 const installDir = (): string => env[ENVIRONMENT.dprintInstallDirectory] ?? join(homedir(), `.${DPRINT.name}`);
 
-export const installDprint = async (versionInput: string, cacheEnabled: boolean, token: string): Promise<{
+export const installDprint = async (
+	versionInput: string,
+	cacheEnabled: boolean,
+	token: string,
+	repository: ReleaseRepository = parseRepository(),
+): Promise<{
 	version: string;
 	location: string;
 	cacheHit: boolean;
@@ -26,7 +33,7 @@ export const installDprint = async (versionInput: string, cacheEnabled: boolean,
 	let release: Release | undefined;
 	let version = specifiedVersion(versionInput);
 	if (version === undefined) {
-		release = await resolveRelease(DPRINT.latestVersion, token);
+		release = await resolveRelease(DPRINT.latestVersion, token, undefined, repository);
 		version = release.tag_name;
 	}
 	info(`Resolved dprint version: ${version}`);
@@ -37,9 +44,11 @@ export const installDprint = async (versionInput: string, cacheEnabled: boolean,
 		}; byte-order=${target.byteOrder}; cache-key=${target.cacheKey}`,
 	);
 	const extension = target.os === RUNTIME_OS.windows ? ".exe" : "";
+	// Hash exact tags: Windows paths must distinguish tags differing only by case.
+	const tagKey = createHash(DPRINT.sha256Algorithm).update(version).digest("hex");
 
 	if (cacheEnabled) {
-		const cachedDir = findTool(DPRINT.name, version, target.cacheKey);
+		const cachedDir = findTool(`${DPRINT.name}-${repository.cacheKey}`, tagKey, target.cacheKey);
 		debug(`Tool-cache lookup for dprint ${version} (${target.cacheKey}): ${cachedDir || "miss"}`);
 		if (cachedDir !== "") {
 			info(`Cache hit: dprint ${version} from tool-cache`);
@@ -47,9 +56,10 @@ export const installDprint = async (versionInput: string, cacheEnabled: boolean,
 		}
 	}
 
-	const binDir = join(installDir(), "bin", target.cacheKey, version);
+	const binDir = join(installDir(), "bin", repository.cacheKey, target.cacheKey, tagKey);
 	const binaryPath = join(binDir, `${DPRINT.name}${extension}`);
-	const binaryKey = `${DPRINT.name}-bin-v${DPRINT.binaryCacheVersion}-${target.cacheKey}-${version}`;
+	const binaryKey =
+		`${DPRINT.name}-bin-v${DPRINT.binaryCacheVersion}-${repository.cacheKey}+${target.cacheKey}-${tagKey}`;
 	const useActionsCache = cacheEnabled && isCacheAvailable();
 	debug(`Binary install directory: ${binDir}`);
 	debug(`Binary cache key: ${binaryKey}; Actions cache enabled: ${useActionsCache}`);
@@ -68,7 +78,7 @@ export const installDprint = async (versionInput: string, cacheEnabled: boolean,
 		}
 	}
 
-	release ??= await resolveRelease(version, token);
+	release ??= await resolveRelease(version, token, undefined, repository);
 	debug(`Published release assets: ${release.assets.map(candidate => candidate.name).join(", ")}`);
 	let asset: ReleaseAsset;
 	try {
@@ -90,7 +100,7 @@ export const installDprint = async (versionInput: string, cacheEnabled: boolean,
 	await mkdir(binDir, { recursive: true });
 	await cp(extractedBinary, binaryPath);
 	if (cacheEnabled) {
-		await cacheToolDirectory(extractedDir, DPRINT.name, version, target.cacheKey);
+		await cacheToolDirectory(extractedDir, `${DPRINT.name}-${repository.cacheKey}`, tagKey, target.cacheKey);
 		debug(`Stored dprint ${version} in tool-cache for ${target.cacheKey}`);
 	}
 

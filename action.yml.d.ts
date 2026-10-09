@@ -14,12 +14,15 @@ declare const action: Readonly<{
 	description: "Install dprint with caching, then check source formatting";
 	author: "kjanat";
 	inputs: Readonly<{
+		repository: ActionInput<"kjanat/dprint">;
 		"dprint-version": ActionInput<"latest">;
 		token: ActionInput<"${{ github.token }}">;
 		cache: ActionInput<"true">;
+		"cache-binary": ActionInput<"false">;
 		"install-only": ActionInput<"false">;
 		"config-path": ActionInput<"">;
 		annotations: ActionInput<"true">;
+		review: ActionInput<"false">;
 		args: ActionInput<"">;
 	}>;
 	outputs: Readonly<{

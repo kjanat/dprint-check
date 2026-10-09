@@ -67,7 +67,7 @@ const configs = sourceEntrypoints.map(entry => ({
 	},
 	treeshake: true,
 	deps: {
-		alwaysBundle: ["detect-libc"],
+		alwaysBundle: ["detect-libc", "toml-eslint-parser", "eslint-visitor-keys"],
 		onlyBundle: false,
 		onlyImport: [],
 	},

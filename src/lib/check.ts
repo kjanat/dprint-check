@@ -5,6 +5,7 @@ import { stripVTControlCharacters } from "node:util";
 import { error as annotateError } from "#lib/actions";
 import { DPRINT, ENVIRONMENT } from "#lib/contracts";
 import { execFileAsync } from "#lib/exec";
+import { createSuggestions, type FormattingDiff, parseFormattingDiffs } from "#lib/suggestions";
 
 interface CheckAnnotation {
 	endLine?: number;
@@ -22,6 +23,7 @@ interface CheckOptions {
 	annotate?: Annotate;
 	debug?: boolean;
 	execute?: Execute;
+	onDiffs?: (diffs: readonly FormattingDiff[]) => void;
 }
 
 type Execute = (commandLine: string, args: string[], options: { maxBuffer: number }) => Promise<unknown>;
@@ -31,6 +33,21 @@ const CHECK_MAX_BUFFER = 64 * 1024 * 1024;
 const ANNOTATION_MESSAGE = "File is not formatted. Run dprint fmt to fix.";
 const ANNOTATION_TITLE = "dprint check";
 const formattingFailures = new WeakSet<object>();
+
+/** Probe the installed binary; fork/backported features cannot be inferred from a version tag. */
+export const supportsReviewDiffs = async (binaryPath: string, execute: Execute = execFileAsync): Promise<boolean> => {
+	try {
+		const result = asOutput(
+			await execute(binaryPath, [DPRINT.command.check, "--help"], { maxBuffer: CHECK_MAX_BUFFER }),
+		);
+		const help = outputText(result.stdout);
+		return /(?:^|\n)\s+--json(?:\s|$)/u.test(help)
+			&& /(?:^|\n)\s+--diff-format(?:\s|=|$)/u.test(help)
+			&& /\bunified\b/u.test(help);
+	} catch {
+		return false;
+	}
+};
 
 const asOutput = (value: unknown): ExecutionOutput => typeof value === "object" && value !== null ? value : {};
 
@@ -176,6 +193,20 @@ export const checkFormatting = async (
 ): Promise<void> => {
 	const { annotations = true, annotate = annotateError, debug = false, execute = execFileAsync } = options;
 	const args = buildCheckArgs(configPath, additionalArgs, debug);
+	const jsonOutput = options.onDiffs !== undefined || args.includes("--json");
+	if (options.onDiffs !== undefined) {
+		if (args.includes(DPRINT.command.listDifferent)) {
+			throw new Error("review cannot be combined with --list-different; suggestions require diffs");
+		}
+		// Own output flags so user arguments cannot switch the review parser to pretty diffs.
+		for (let index = 0; index < args.length;) {
+			const argument = args[index];
+			if (argument === "--diff-format") args.splice(index, 2);
+			else if (argument?.startsWith("--diff-format=") || argument === "--json") args.splice(index, 1);
+			else index++;
+		}
+		args.push("--diff-format", "unified", "--json");
+	}
 	try {
 		writeOutput(asOutput(await execute(binaryPath, args, { maxBuffer: CHECK_MAX_BUFFER })));
 	} catch (error) {
@@ -183,6 +214,28 @@ export const checkFormatting = async (
 		writeOutput(output);
 		if (isCheckFailure(error)) {
 			formattingFailures.add(error);
+			if (jsonOutput) {
+				const diffs = parseFormattingDiffs(outputText(output.stdout));
+				options.onDiffs?.(diffs);
+				if (annotations) {
+					const workspace = env[ENVIRONMENT.githubWorkspace] ?? cwd();
+					for (const diff of diffs) {
+						const suggestions = createSuggestions([diff], workspace);
+						if (suggestions.length === 0) {
+							annotate(ANNOTATION_MESSAGE, { file: annotationPath(diff.file), title: ANNOTATION_TITLE });
+						}
+						for (const suggestion of suggestions) {
+							annotate(ANNOTATION_MESSAGE, {
+								file: suggestion.path,
+								line: suggestion.startLine,
+								endLine: suggestion.endLine,
+								title: ANNOTATION_TITLE,
+							});
+						}
+					}
+				}
+				throw error;
+			}
 			if (!annotations) throw error;
 			const diffLocations = new Map(
 				parseCheckAnnotations(outputText(output.stdout), false)

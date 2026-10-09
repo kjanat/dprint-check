@@ -47,10 +47,13 @@ const action = manifest;
 
 expectTypeOf<DeclaredManifest>().not.toBeAny();
 expectTypeOf<DeclaredManifest["runs"]["using"]>().toEqualTypeOf<"node24">();
+expectTypeOf<DeclaredManifest["inputs"]["repository"]["default"]>().toEqualTypeOf<"kjanat/dprint">();
 expectTypeOf<DeclaredManifest["inputs"]["token"]["default"]>().toEqualTypeOf<"${{ github.token }}">();
 expectTypeOf<DeclaredManifest["inputs"]["cache"]["default"]>().toEqualTypeOf<"true">();
+expectTypeOf<DeclaredManifest["inputs"]["cache-binary"]["default"]>().toEqualTypeOf<"false">();
 expectTypeOf<DeclaredManifest["inputs"]["install-only"]["default"]>().toEqualTypeOf<"false">();
 expectTypeOf<DeclaredManifest["inputs"]["annotations"]["default"]>().toEqualTypeOf<"true">();
+expectTypeOf<DeclaredManifest["inputs"]["review"]["default"]>().toEqualTypeOf<"false">();
 
 describe("action metadata", () => {
 	test("uses Node.js 24 with an always-running post step", () => {
@@ -68,11 +71,14 @@ describe("action metadata", () => {
 
 	const defaults = [
 		[ACTION_INPUT.dprintVersion, DPRINT.latestVersion],
+		[ACTION_INPUT.repository, "kjanat/dprint"],
 		[ACTION_INPUT.token, "${{ github.token }}"],
 		[ACTION_INPUT.cache, ACTION_VALUE.true],
+		[ACTION_INPUT.cacheBinary, ACTION_VALUE.false],
 		[ACTION_INPUT.installOnly, ACTION_VALUE.false],
 		[ACTION_INPUT.configPath, ""],
 		[ACTION_INPUT.annotations, ACTION_VALUE.true],
+		[ACTION_INPUT.review, ACTION_VALUE.false],
 		[ACTION_INPUT.args, ""],
 	] as const;
 

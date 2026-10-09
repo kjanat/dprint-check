@@ -10,13 +10,34 @@ import {
 	isFormattingFailure,
 	parseArgs,
 	parseCheckAnnotations,
+	supportsReviewDiffs,
 } from "#lib/check";
 import { DPRINT, ENVIRONMENT } from "#lib/contracts";
+import type { FormattingDiff } from "#lib/suggestions";
 import { TEST_DPRINT_BINARY, useTestContext } from "#test/helpers";
 
 const context = useTestContext();
 const fixture = (stream: "stderr" | "stdout", name: string): string =>
 	readFileSync(join(import.meta.dirname, "fixtures", "dprint", stream, `${name}.txt`), "utf8");
+
+test("probes actual check capabilities without sending new flags to older dprint versions", async t => {
+	for (
+		const [help, supported] of [
+			["Options:\n      --json\n      --diff-format <format>\n          possible values: pretty, unified\n", true],
+			["Options:\n      --list-different\n      --config <path>\n", false],
+			["Options:\n      --json\n", false],
+			["Options:\n      --diff-format <format>\n          possible values: pretty, unified\n", false],
+		]
+	) {
+		const execute = t.mock.fn(async (_binary: string, _args: string[]) => ({ stdout: help }));
+		assert.equal(await supportsReviewDiffs(TEST_DPRINT_BINARY, execute), supported);
+		assert.deepEqual(execute.mock.calls[0]?.arguments[1], ["check", "--help"]);
+	}
+	assert.equal(
+		await supportsReviewDiffs(TEST_DPRINT_BINARY, async () => Promise.reject(new Error("help failed"))),
+		false,
+	);
+});
 
 describe("buildCheckArgs", () => {
 	const cases = [
@@ -287,4 +308,81 @@ test("can disable formatting annotations", async t => {
 	assert.strictEqual(annotate.mock.callCount(), 0);
 	assert.strictEqual(isFormattingFailure(failure), true);
 	assert.deepStrictEqual(stdout.mock.calls[0]?.arguments, [failure.stdout]);
+});
+
+test("review mode collects NDJSON diffs in one invocation even with annotations disabled", async t => {
+	const diff: FormattingDiff = {
+		file: "src/example.ts",
+		diff: "--- original\n+++ formatted\n@@ -1 +1 @@\n-const x=1;\n+const x = 1;\n",
+	};
+	const failure = Object.assign(new Error("dprint check failed"), { code: 20, stdout: `${JSON.stringify(diff)}\n` });
+	const execute = t.mock.fn(async (_binary: string, _args: string[]) => Promise.reject(failure));
+	const annotate = t.mock.fn(() => {});
+	const found: FormattingDiff[] = [];
+	t.mock.method(process.stdout, "write", () => true);
+	await assert.rejects(
+		checkFormatting(TEST_DPRINT_BINARY, "", "--diff-format pretty --json", {
+			execute,
+			annotate,
+			annotations: false,
+			onDiffs: diffs => found.push(...diffs),
+		}),
+		error => error === failure,
+	);
+	assert.equal(execute.mock.callCount(), 1);
+	assert.deepEqual(execute.mock.calls[0]?.arguments[1], ["check", "--diff-format", "unified", "--json"]);
+	assert.deepEqual(found, [diff]);
+	assert.equal(annotate.mock.callCount(), 0);
+	assert.equal(isFormattingFailure(failure), true);
+});
+
+test("JSON check output still emits file and range annotations", async t => {
+	const diff = { file: "src/example.ts", diff: "--- original\n+++ formatted\n@@ -7 +7 @@\n-old\n+new\n" };
+	const failure = Object.assign(new Error("dprint check failed"), { code: 20, stdout: `${JSON.stringify(diff)}\n` });
+	const execute = t.mock.fn(async (_binary: string, _args: string[]) => Promise.reject(failure));
+	const annotate = t.mock.fn(
+		(_message: string, _properties: { file: string; line?: number; endLine?: number; title: string }) => {},
+	);
+	t.mock.method(process.stdout, "write", () => true);
+	await assert.rejects(
+		checkFormatting(TEST_DPRINT_BINARY, "", "--json", { execute, annotate }),
+		error => error === failure,
+	);
+	assert.equal(execute.mock.callCount(), 1);
+	assert.deepEqual(annotate.mock.calls[0]?.arguments[1], {
+		file: "src/example.ts",
+		line: 7,
+		endLine: 7,
+		title: "dprint check",
+	});
+});
+
+test("rejects review output modes that suppress diffs before invoking dprint", async t => {
+	const execute = t.mock.fn(async () => ({}));
+	await assert.rejects(
+		checkFormatting(TEST_DPRINT_BINARY, "", "--list-different", {
+			execute,
+			onDiffs: () => {},
+		}),
+		/review cannot be combined/u,
+	);
+	assert.equal(execute.mock.callCount(), 0);
+});
+
+test("collects findings across all config roots while preserving formatting failure", async t => {
+	const diff = { file: "src/example.ts", diff: "--- original\n+++ formatted\n@@ -1 +1 @@\n-old\n+new\n" };
+	const failure = Object.assign(new Error("dprint check failed"), { code: 20, stdout: `${JSON.stringify(diff)}\n` });
+	const execute = t.mock.fn(async () => Promise.reject(failure));
+	const found: FormattingDiff[] = [];
+	t.mock.method(process.stdout, "write", () => true);
+	await assert.rejects(
+		checkConfigurations(TEST_DPRINT_BINARY, ["first.json", "second.toml"], "", {
+			execute,
+			annotations: false,
+			onDiffs: diffs => found.push(...diffs),
+		}),
+		error => error === failure,
+	);
+	assert.equal(execute.mock.callCount(), 2);
+	assert.deepEqual(found, [diff, diff]);
 });

@@ -4,6 +4,7 @@ import { describe, test } from "node:test";
 
 import { DPRINT } from "#lib/contracts";
 import { GITHUB_API, githubApiHeaders } from "#lib/github";
+import { parseRepository } from "#lib/repository";
 import { resolveRelease, specifiedVersion } from "#lib/version";
 import { releaseAsset, TEST_DPRINT_ASSET, TEST_DPRINT_VERSION } from "#test/helpers";
 
@@ -52,7 +53,7 @@ describe("resolveRelease", () => {
 
 		assert.deepStrictEqual(await resolveRelease(TEST_DPRINT_VERSION, "test-token", client), release);
 		assert.deepStrictEqual(requests, [{
-			url: `${GITHUB_API.dprintReleasesUrl}/tags/${TEST_DPRINT_VERSION}`,
+			url: `${GITHUB_API.baseUrl}/repos/kjanat/dprint/releases/tags/${TEST_DPRINT_VERSION}`,
 			headers: githubApiHeaders("test-token"),
 		}]);
 	});
@@ -62,7 +63,7 @@ describe("resolveRelease", () => {
 
 		assert.deepStrictEqual(await resolveRelease(DPRINT.latestVersion, "", client), release);
 		assert.deepStrictEqual(requests, [{
-			url: `${GITHUB_API.dprintReleasesUrl}/${DPRINT.latestVersion}`,
+			url: `${GITHUB_API.baseUrl}/repos/kjanat/dprint/releases/${DPRINT.latestVersion}`,
 			headers: githubApiHeaders(),
 		}]);
 	});
@@ -75,4 +76,16 @@ describe("resolveRelease", () => {
 			message: "Failed to resolve dprint release latest (HTTP 200)",
 		});
 	});
+
+	for (const input of ["latest", "v0.56.1-fork.1", "fork/preview+1"]) {
+		test(`resolves ${input} from the selected repository`, async () => {
+			const { client, requests } = successfulClient();
+			await resolveRelease(input, "test-token", client, parseRepository("dprint/dprint"));
+			const suffix = input === "latest" ? "latest" : `tags/${encodeURIComponent(input)}`;
+			assert.deepStrictEqual(requests, [{
+				url: `${GITHUB_API.baseUrl}/repos/dprint/dprint/releases/${suffix}`,
+				headers: githubApiHeaders("test-token"),
+			}]);
+		});
+	}
 });

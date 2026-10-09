@@ -1,9 +1,7 @@
 import type { OutgoingHttpHeaders } from "node:http";
 
-const DPRINT_REPOSITORY = "dprint/dprint";
-
 export const GITHUB_API = {
-	dprintReleasesUrl: `https://api.github.com/repos/${DPRINT_REPOSITORY}/releases`,
+	baseUrl: "https://api.github.com",
 	jsonMediaType: "application/vnd.github+json",
 	userAgent: "dprint-check-action",
 	version: "2026-03-10",
